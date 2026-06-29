@@ -1,0 +1,16 @@
+[project]
+name = "session-sage"
+version = "0.1.0"
+description = "Mine GitHub Copilot CLI session history into a typed temporal knowledge graph"
+requires-python = ">=3.11"
+dependencies = []
+
+[project.scripts]
+session-sage = "session_sage.run:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv]
+dev-dependencies = []
