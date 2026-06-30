@@ -91,6 +91,12 @@ PREFERENCE_ARCHETYPES: list[tuple[re.Pattern, str, str]] = [
     # Snowflake as fallback only
     (re.compile(r"snowflake.{0,30}(fallback|only|last resort)|duckdb.{0,30}(first|primary|prefer)", re.I),
      "pref_duckdb_first", "DuckDB first, Snowflake as fallback"),
+    # ~/Projects/ as canonical code location — any code/project reference anchored there
+    (re.compile(r"~/projects/|home.{0,10}projects.{0,10}folder|projects\s+folder|in\s+projects\b", re.I),
+     "pref_projects_folder", "~/Projects/ is the canonical code home"),
+    # Output stays inside its own project — not in Downloads or excel folder
+    (re.compile(r"(output|reports?|results?).{0,30}(inside|within|in\s+the)\s+(project|repo)|not.{0,20}downloads?", re.I),
+     "pref_output_in_project", "Outputs belong inside the project folder"),
 ]
 
 CORRECTION_ARCHETYPES: list[tuple[re.Pattern, str, str]] = [

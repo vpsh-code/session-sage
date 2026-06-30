@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--output",
         type=Path,
-        default=Path.home() / "Downloads" / "excel" / "session_sage_graph.html",
+        default=Path.home() / "Projects" / "session-sage" / "output" / "session_sage_graph.html",
         help="Output HTML path",
     )
     parser.add_argument(
