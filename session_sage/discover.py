@@ -492,67 +492,97 @@ def discover_topics(
 
 
 # ---------------------------------------------------------------------------
-# Correction discovery — behavioural turns + content extraction
+# Correction discovery — full statistical scan, independent of classifier
 # ---------------------------------------------------------------------------
 
-# Extract the subject of a correction from short correction turns
+# Signals that a turn is a user correction (not an agent response)
+_CORRECTION_SIGNALS = [
+    # Explicit negation/redirection
+    re.compile(r"^\s*(?:no[,!. ]|nope[,!. ]|not\s+(?:quite|exactly|right|correct)|wrong\b)", re.I),
+    re.compile(r"\b(?:that'?s|this is|that is|you'?re|you are)\s+(?:wrong|incorrect|not right|not what i|not how)", re.I),
+    re.compile(r"\b(?:i said|i asked|i told you|i mentioned|i specified|i already told)\b", re.I),
+    re.compile(r"\b(?:you (?:should|shouldn'?t|must|mustn'?t|can'?t|don'?t)|don'?t (?:use|do|call|say|write|add|run|apply|send|forget|hardcode))\b", re.I),
+    re.compile(r"\b(?:never use|always (?:use|do|apply|remember|include)|stop (?:using|doing|calling|adding))\b", re.I),
+    # Frustration + correction context
+    re.compile(r"\b(?:again[,!? ]|still\s+(?:wrong|not|broken|missing|the same)|keep(?:s)?\s+(?:wrong|forget|missing|using|doing))\b", re.I),
+    re.compile(r"\b(?:why (?:did you|are you|is it|isn'?t it)|you missed|you forgot|you used|you called)\b", re.I),
+    # Format / tool corrections
+    re.compile(r"\b(?:not (?:xlsx|excel|json|csv)|should be (?:xlsx|excel)|(?:wrong|incorrect) (?:tool|format|file|path|output|query|model))\b", re.I),
+]
+
+# Patterns to extract the SUBJECT of what was corrected
 _CORRECTION_SUBJ = re.compile(
     r"""
-    (?:that'?s?\s+not|you\s+(?:said|wrote|did|missed|forgot|used)|
+    (?:that'?s?\s+not|you\s+(?:said|wrote|did|missed|forgot|used|called)|
        not\s+(?:what|how|the\s+way)|you'?re\s+(?:wrong|incorrect)|
        still\s+(?:wrong|broken|not\s+working)|
        why\s+(?:is|are|did|didn'?t)|you\s+(?:should|must)\s+not|
-       never\s+use|don'?t\s+use|wrong\s+(?:tool|file|path|format|output|query))
-    \s+(.{5,60}?)(?:[.!?\n]|$)
+       never\s+use|don'?t\s+use|wrong\s+(?:tool|file|path|format|output|query)|
+       you\s+(?:missed|forgot|used|called)|i\s+(?:said|asked|told\s+you|mentioned|specified))
+    \s+(.{4,70}?)(?:[.!?\n]|$)
     """,
     re.I | re.X,
 )
 
 _NEGATION_SUBJECT = re.compile(
-    r"\b(?:not|never|don'?t|shouldn'?t|mustn'?t)\s+((?:use|call|say|write|do|run|apply|add|create|send)\s+\w[\w\s]{3,40}?)(?:[,.\n]|$)",
+    r"\b(?:not|never|don'?t|shouldn'?t|mustn'?t)\s+((?:use|call|say|write|do|run|apply|add|create|send|hardcode|forget|include)\s+\w[\w\s]{2,40}?)(?:[,.\n]|$)",
     re.I,
+)
+
+# Minimal subject vocab filter — subjects that are too generic to be useful
+_SUBJ_STOPWORDS = frozenset("this that the it a an is was were has have do did be been".split())
+
+_SYSTEM_TURN_RE = re.compile(
+    r"^(?:<skill-context|you are a|resolve the user|today:\s*\d{4})", re.I
 )
 
 
 def discover_corrections(signals: list["TurnSignal"]) -> list[DiscoveredCorrection]:
     """
-    Discover what the agent got wrong by mining correction-flagged turns.
-    Subject extraction is purely textual — no hardcoded correction categories.
+    Discover corrections by statistically scanning ALL turns — no pre-classification gate.
+    Uses multiple signal patterns to detect correction context, then extracts subject.
     """
-    # Only look at turns the classifier flagged as corrections
-    correction_signals = [s for s in signals if s.is_correction]
-
     subj_sessions: dict[str, set[str]] = defaultdict(set)
     subj_counts:   Counter[str] = Counter()
     subj_first:    dict[str, str] = {}
     subj_last:     dict[str, str] = {}
     subj_examples: dict[str, list[str]] = defaultdict(list)
 
-    for sig in correction_signals:
+    for sig in signals:
+        raw = (sig.turn.user_message or "").lstrip()
+        # Skip injected system messages and pasted prompts
+        if sig.is_pasted_prompt or _SYSTEM_TURN_RE.match(raw) or len(raw) > 800:
+            continue
+
         msg = sig.cleaned_message
+
+        # Check if this turn has any correction signal
+        has_signal = any(pat.search(raw) for pat in _CORRECTION_SIGNALS)
+        if not has_signal:
+            continue
+
         sid = sig.turn.session_id
         ts  = sig.turn.timestamp
-
         subjects: list[str] = []
 
+        # Try to extract specific subjects
         for m in _CORRECTION_SUBJ.finditer(msg):
-            raw = m.group(1).strip().lower()
-            # Normalise: trim stopwords from edges
-            toks = [w for w in raw.split() if w not in _STOPWORDS]
+            raw_subj = m.group(1).strip().lower()
+            toks = [w for w in raw_subj.split() if w not in _STOPWORDS and w not in _SUBJ_STOPWORDS]
             if 2 <= len(toks) <= 8:
-                subjects.append(" ".join(toks))
+                subjects.append(" ".join(toks[:6]))
 
         for m in _NEGATION_SUBJECT.finditer(msg):
-            raw = m.group(1).strip().lower()
-            toks = [w for w in raw.split() if w not in _STOPWORDS]
+            raw_subj = m.group(1).strip().lower()
+            toks = [w for w in raw_subj.split() if w not in _STOPWORDS and w not in _SUBJ_STOPWORDS]
             if 2 <= len(toks) <= 8:
-                subjects.append(" ".join(toks))
-
-        # Fallback: if turn is very short, use the whole cleaned message as subject
-        if not subjects and len(msg.split()) <= 12:
-            toks = [w for w in _tokenize(msg) if w not in _STOPWORDS]
-            if toks:
                 subjects.append(" ".join(toks[:6]))
+
+        # Fallback: for short turns use key n-grams as subject
+        if not subjects and len(raw) <= 150:
+            toks = [w for w in _tokenize(msg) if w not in _SUBJ_STOPWORDS]
+            if len(toks) >= 2:
+                subjects.append(" ".join(toks[:5]))
 
         for subj in subjects:
             subj_sessions[subj].add(sid)
@@ -562,7 +592,7 @@ def discover_corrections(signals: list["TurnSignal"]) -> list[DiscoveredCorrecti
             if subj not in subj_last or ts > subj_last[subj]:
                 subj_last[subj] = ts
             if len(subj_examples[subj]) < 4:
-                subj_examples[subj].append(_short(msg))
+                subj_examples[subj].append(_short(raw, 100))
 
     result = [
         DiscoveredCorrection(
@@ -574,9 +604,10 @@ def discover_corrections(signals: list["TurnSignal"]) -> list[DiscoveredCorrecti
             examples=subj_examples[subj],
         )
         for subj in subj_counts
-        if len(subj_sessions[subj]) >= 1  # even a single clear correction is signal
+        if len(subj_sessions[subj]) >= 1
     ]
-    return sorted(result, key=lambda c: -(c.session_count * math.log1p(c.count)))[:40]
+    # Score: session spread is primary signal, count is secondary
+    return sorted(result, key=lambda c: -(c.session_count**1.5 * math.log1p(c.count)))[:50]
 
 
 # ---------------------------------------------------------------------------

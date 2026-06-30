@@ -269,6 +269,17 @@ sim.on('tick', () => {{
   nodeEl.attr('transform', d => `translate(${{d.x}},${{d.y}})`);
 }});
 
+// ── Apply initial visibility (must run after D3 binds nodes/links) ────────
+function applyVisibility() {{
+  nodeEl.attr('display', d => visibleGroups.has(d.group) ? null : 'none');
+  linkEl.attr('display', l => {{
+    const src = typeof l.source === 'object' ? l.source : nodeById[l.source];
+    const tgt = typeof l.target === 'object' ? l.target : nodeById[l.target];
+    return (visibleGroups.has(src?.group) && visibleGroups.has(tgt?.group)) ? null : 'none';
+  }});
+}}
+applyVisibility();
+
 // ── Detail panel ─────────────────────────────────────────────────────────
 function showDetail(d) {{
   document.getElementById('node-detail').style.display = 'block';
@@ -342,13 +353,7 @@ document.querySelectorAll('.filter-btn[data-group]').forEach(btn => {{
     btn.classList.toggle('active');
     if (btn.classList.contains('active')) visibleGroups.add(grp);
     else visibleGroups.delete(grp);
-
-    nodeEl.attr('display', d => visibleGroups.has(d.group) ? null : 'none');
-    linkEl.attr('display', l => {{
-      const src = typeof l.source === 'object' ? l.source : nodeById[l.source];
-      const tgt = typeof l.target === 'object' ? l.target : nodeById[l.target];
-      return (visibleGroups.has(src?.group) && visibleGroups.has(tgt?.group)) ? null : 'none';
-    }});
+    applyVisibility();
   }});
 }});
 
