@@ -153,11 +153,12 @@ KNOWLEDGE_BOUNDARY_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 STAKEHOLDER_CONTEXT_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\b(c[- ]?suite|exec(utive)?s?|senior leadership|hrlt|chro|cfo|ceo|coo)\b", re.I), "executive_audience"),
+    # Tightened: "exec" alone matches "execute/executed"; require full form or paired context
+    (re.compile(r"\b(?:c[- ]?suite|senior leadership|hrlt|chro|cfo|ceo|coo)\b|\bexec(?:utive)?s?\b.{0,40}\b(?:audience|ready|review|presentation|will ask|care about)\b", re.I), "executive_audience"),
     (re.compile(r"\b(board|steerco|leadership team|management team)\b", re.I), "formal_audience"),
     (re.compile(r"\b(presenting to|showing to|sharing with|this (will|needs to) go to)\b", re.I), "handoff_context"),
     (re.compile(r"\bpoliticall?y? sensitive\b|\bsensitive topic\b", re.I), "political_sensitivity"),
-    (re.compile(r"\bmy (manager|boss|director|stakeholder|team)\b", re.I), "named_stakeholder"),
+    (re.compile(r"\bmy (manager|boss|director|stakeholder)\b", re.I), "named_stakeholder"),
     (re.compile(r"\bmake it (exec|executive|leadership)[ -]?(ready|friendly)\b", re.I), "exec_ready_output"),
     (re.compile(r"\bwhat (they|leadership|execs?) (care about|will ask)\b", re.I), "stakeholder_need"),
 ]
@@ -168,7 +169,8 @@ DECISION_PATTERN_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\btrade[- ]?off[s]?\b", re.I), "tradeoff_reasoning"),
     (re.compile(r"\bfast(est)? (path|way|approach)\b|\bsurgical\b", re.I), "speed_priority"),
     (re.compile(r"\brobust\b|\bproduction[- ]?ready\b|\bdurable\b", re.I), "durability_priority"),
-    (re.compile(r"\b(defer|not now|later|skip (for now|this))\b", re.I), "deferral"),
+    # Tightened: require verb+object — not bare "later"
+    (re.compile(r"\b(?:defer|postpone|park|table)\s+(?:it|this|that|for now)\b|\b(?:not now|skip\s+(?:it|this|that)\s+for now)\b|\bcome back to (?:it|this|that) later\b", re.I), "deferral"),
     (re.compile(r"\bsticking with\b|\bgoing with\b|\bconfirmed[:\s]\b", re.I), "decision_confirmed"),
 ]
 
@@ -177,19 +179,22 @@ FRUSTRATION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bwhy (is|are) (you|this|it) still\b", re.I), "repeat_failure"),
     (re.compile(r"\b(not again|again\?*$|same (thing|issue|error|problem) again)\b", re.I | re.M), "recurrence"),
     (re.compile(r"\bstop (doing|using|asking|adding|explaining)\b", re.I), "behavior_stop"),
-    (re.compile(r"\bjust (do|fix|run|answer|use) it\b", re.I), "impatience"),
+    # Tightened: require "already/now" to avoid neutral instructions like "just run it"
+    (re.compile(r"\bjust\s+(?:do|fix|run|answer|use)\s+it\s+(?:already|now)\b", re.I), "impatience"),
     (re.compile(r"\b(too verbose|too much explanation|stop explaining)\b", re.I), "verbosity_friction"),
     (re.compile(r"\bhow (many times|often) (do i|have i|must i)\b", re.I), "repeat_instruction"),
 ]
 
 TRUST_CALIBRATION_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\bare you sure\b|\bdouble[- ]?check\b", re.I), "confidence_probe"),
-    (re.compile(r"\bverify\b|\bvalidate\b|\bconfirm (this|that|it)\b", re.I), "verification_request"),
+    (re.compile(r"\bare you sure\b|\bdouble[- ]?check\b|\bsanity[- ]?check\b", re.I), "confidence_probe"),
+    # Tightened (Opus): require output-noun context; bare "verify" fires on "verify installation"
+    (re.compile(r"\bverify\s+(the\s+)?(answer|result|output|number|count|claim|finding|math|total)s?\b|\bvalidate\s+(this|that|the\s+(answer|result|output|finding))\b|\bconfirm\s+(this|that|it|the\s+(number|answer|result|count))\b|\bdouble[- ]?check\s+(this|that|the|your)\b", re.I), "verification_request"),
     (re.compile(r"\bdon'?t (guess|hallucinate|assume|make up)\b", re.I), "anti_hallucination"),
     (re.compile(r"\bread (the )?(file|docs?|source|schema) first\b", re.I), "source_first"),
     (re.compile(r"\bprove it\b|\bshow (me )?(proof|evidence|source)\b", re.I), "proof_demand"),
     (re.compile(r"\bi trust (you|your judgment)\b|\bgo ahead (autonomously)?\b", re.I), "autonomy_granted"),
-    (re.compile(r"\bcheck (before|first|it)\b", re.I), "pre_check_required"),
+    # Tightened: require explicit ordering intent
+    (re.compile(r"\b(?:check|verify|validate|confirm)\s+(?:first|before\s+(?:doing|changing|running|writing|proceeding))\b|\bbefore you\s+(?:do|change|run|write|proceed)\b", re.I), "pre_check_required"),
 ]
 
 ARCHITECTURE_MENTAL_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
@@ -218,7 +223,8 @@ QUALITY_BAR_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bnot (good enough|acceptable|usable|clean enough)\b", re.I), "quality_rejection"),
     (re.compile(r"\bproduction[- ]?ready\b|\bdurable\b", re.I), "production_standard"),
     (re.compile(r"\bno ai slop\b|\bnot ai slop\b", re.I), "anti_ai_slop"),
-    (re.compile(r"\bprecise\b|\bexact\b|\bno hand[- ]?waving\b", re.I), "precision_standard"),
+    # Tightened (Opus): require intent context — bare "exact" fires on "exact path", "exact column"
+    (re.compile(r"\bprecise(ly)?\b|\b(be|needs? to be|must be|want it)\s+exact\b|\bexactly\s+(right|correct|accurate|what)\b|\bno hand[- ]?waving\b|\bpinpoint\b", re.I), "precision_standard"),
     (re.compile(r"\bhuman[- ]?readable\b", re.I), "human_readability"),
     (re.compile(r"\bcomplete\b.{0,30}(solution|output|answer)\b", re.I), "completeness_standard"),
 ]
@@ -226,7 +232,8 @@ QUALITY_BAR_PATTERNS: list[tuple[re.Pattern, str]] = [
 AGENCY_PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bdon'?t (ask|wait for) (me|permission|confirmation)\b", re.I), "no_permission_loop"),
     (re.compile(r"\bmake (reasonable )?assumptions\b", re.I), "assumption_autonomy"),
-    (re.compile(r"\b(proceed|go ahead|just do it|do it)\b", re.I), "execution_autonomy"),
+    # Tightened: "do it" alone is too broad; require proceed/go-ahead or explicit suffix
+    (re.compile(r"\b(?:proceed|go ahead)\b|\bjust\s+(?:do|fix|run|ship|implement)\s+it\b|\bdo it\s+(?:now|autonomously|without asking)\b", re.I), "execution_autonomy"),
     (re.compile(r"\bchallenge (me|the methodology|the assumption|my)\b", re.I), "challenge_expected"),
     (re.compile(r"\b(be concise|short answer|brief(ly)?|≤\s*\d+ words?)\b", re.I), "conciseness"),
     (re.compile(r"\bdon'?t over[- ]?explain\b|\bskip the explanation\b", re.I), "low_explanation"),
@@ -234,10 +241,76 @@ AGENCY_PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bloop (until|till) (green|done|complete|fixed)\b", re.I), "autonomous_loop"),
 ]
 
+# ---------------------------------------------------------------------------
+# Additional high-value domain-specific signals (Opus Round 1)
+# ---------------------------------------------------------------------------
+
+TOOL_DIRECTIVE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(use|run)\s+\w+\s+(not|instead of)\s+\w+\b", re.I), "tool_directive"),
+    (re.compile(r"\bnever\s+(use|run|call)\s+\w+\b", re.I), "tool_prohibition"),
+    (re.compile(r"\balways\s+(use|run|call)\s+(wf_duck|snowflake|sf\.py|nsc_harness)\b", re.I), "tool_mandate"),
+]
+
+TERMINOLOGY_CORRECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bit'?s\s+(called|named)\s+\w+\s+not\s+\w+\b", re.I), "term_correction"),
+    (re.compile(r"\bdon'?t\s+(call|say)\s+(it|that)\b", re.I), "term_correction"),
+    (re.compile(r"\bnever\s+(call|say|use)\s+['\"]?\w+['\"]?\b.{0,30}\b(instead|use)\b", re.I), "term_correction"),
+    (re.compile(r"\bcorrect\s+term\s+is\b|\bshould be called\b", re.I), "term_correction"),
+    (re.compile(r"\bworker id\b|\bglobal id\b|\bcdsid\b.{0,20}\b(not|never|don.?t)\b", re.I), "id_terminology"),
+    (re.compile(r"\bquestion topic\b.{0,20}\b(not|never)\b.{0,20}\bdimension\b", re.I), "dimension_terminology"),
+]
+
+FORMAT_PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(output|save|export|write|generate)\s+(as\s+)?(xlsx|excel|docx|pptx)\b", re.I), "xlsx_output"),
+    (re.compile(r"\bnever\s+json\b|\bnot\s+json\b|\bjson\s+is\s+not\b", re.I), "no_json_output"),
+    (re.compile(r"\bhuman[- ]?readable\s+(output|format|file|sheet)\b", re.I), "human_readable_format"),
+    (re.compile(r"\bnamed?\s+sheet\b|\bsheet\s+name\b|\bsheet names\b", re.I), "named_sheets"),
+]
+
+MIP_COMPLIANCE_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\b(mip|proprietary)\s+label\b", re.I), "mip_label"),
+    (re.compile(r"\bapply.{0,20}\b(label|sensitivity)\b", re.I), "apply_label"),
+    (re.compile(r"\blabelinfo\.xml\b|\bsensitivity label\b", re.I), "label_artifact"),
+    (re.compile(r"\bforgot.{0,20}label\b|\bnot labell?ed\b|\bmissing.{0,10}label\b", re.I), "label_miss"),
+]
+
+SCOPE_DISAMBIGUATION_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bin\s+this\s+(dataset|file|extract|snapshot|workbook)\b", re.I), "local_scope"),
+    (re.compile(r"\bcompany[- ]?wide\b|\ball\s+(employees?|workers?|staff)\b", re.I), "company_scope"),
+    (re.compile(r"\bscope\s+(of\s+)?(this|the)\s+(question|query|analysis)\b", re.I), "scope_clarify"),
+    (re.compile(r"\b(local|snowflake|duckdb)\b.{0,30}\b(scope|source|data)\b", re.I), "data_source_scope"),
+]
+
+USER_REDIRECT_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"^(no[,.]?\s|wrong[,.]?\s|that'?s wrong|stop\s)", re.I | re.M), "direct_redirect"),
+    (re.compile(r"\bi\s+(said|asked|told you|mentioned)\b", re.I), "reminder_redirect"),
+    (re.compile(r"\bdid\s+i\s+ask\b|\bnot\s+what\s+i\s+(asked|wanted|said|meant)\b", re.I), "explicit_mismatch"),
+]
+
+MODEL_COST_PATTERNS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bnever\s+(use\s+)?opus\b|\bno\s+opus\b", re.I), "opus_prohibition"),
+    (re.compile(r"\b(cheaper|free|0x|0\.33x|multiplier)\b.{0,40}(model|claude|gpt)\b", re.I), "cost_awareness"),
+    (re.compile(r"\b(gpt[- ]?5[\.\-]?\d?[- ]?mini|haiku|sonnet)\b.{0,30}\b(use|prefer|instead)\b", re.I), "model_preference"),
+    (re.compile(r"\bmodel\s+(multiplier|cost|tier|selection)\b", re.I), "model_routing"),
+]
+
 
 # ---------------------------------------------------------------------------
-# Topic / concept / tool buckets
+# Pasted-prompt filter — skip turns that are pasted templates, not user voice
 # ---------------------------------------------------------------------------
+
+def _is_pasted_prompt(text: str) -> bool:
+    """Return True if this turn looks like a pasted external prompt, not the user's own words."""
+    if len(text) < 400:
+        return False
+    t = text.lower()
+    return (
+        t.startswith("you are a") or t.startswith("you are an")
+        or (t.count("\n") > 15 and ("## " in text or "```" in text))
+        or bool(re.search(r"^#{1,3} \w", text, re.M))
+    )
+
+
 
 TOPIC_BUCKETS: dict[str, list[str]] = {
     "Workforce Metrics":   ["fte", "headcount", " hc ", "ext hc", "workforce", "metric", "head count"],
@@ -299,8 +372,16 @@ class TurnSignal:
     urgency_types: list[str] = field(default_factory=list)
     quality_types: list[str] = field(default_factory=list)
     agency_types: list[str] = field(default_factory=list)
+    tool_directive_types: list[str] = field(default_factory=list)
+    terminology_types: list[str] = field(default_factory=list)
+    format_types: list[str] = field(default_factory=list)
+    mip_types: list[str] = field(default_factory=list)
+    scope_types: list[str] = field(default_factory=list)
+    redirect_types: list[str] = field(default_factory=list)
+    model_cost_types: list[str] = field(default_factory=list)
     topics: list[str] = field(default_factory=list)
     tools: list[str] = field(default_factory=list)
+    is_pasted_prompt: bool = False
 
     @property
     def is_correction(self) -> bool: return bool(self.correction_types)
@@ -314,30 +395,37 @@ class TurnSignal:
     def is_urgency(self) -> bool: return bool(self.urgency_types)
 
 
-_ALL_BEHAVIOURAL: list[tuple[list, str]] = [
-    ([], "correction_types"),       # wired below per-list
-]
-
-
 def classify_turn(turn: Turn) -> TurnSignal:
     clean = _clean_message(turn.user_message or "")
     msg_lower = clean.lower()
-    sig = TurnSignal(turn=turn, cleaned_message=clean)
+    pasted = _is_pasted_prompt(clean)
+    sig = TurnSignal(turn=turn, cleaned_message=clean, is_pasted_prompt=pasted)
+
+    if pasted:
+        # Skip signal extraction on pasted external prompts — not user voice
+        return sig
 
     _scan = lambda patterns, bucket: [bucket.append(lbl) for pat, lbl in patterns if pat.search(msg_lower)]
-    _scan(CORRECTION_PATTERNS,              sig.correction_types)
-    _scan(PREFERENCE_PATTERNS,              sig.preference_types)
-    _scan(PERSUASION_PATTERNS,              sig.persuasion_types)
-    _scan(METHODOLOGY_CHALLENGE_PATTERNS,   sig.methodology_types)
-    _scan(KNOWLEDGE_BOUNDARY_PATTERNS,      sig.knowledge_boundary_types)
-    _scan(STAKEHOLDER_CONTEXT_PATTERNS,     sig.stakeholder_types)
-    _scan(DECISION_PATTERN_PATTERNS,        sig.decision_types)
-    _scan(FRUSTRATION_PATTERNS,             sig.frustration_types)
-    _scan(TRUST_CALIBRATION_PATTERNS,       sig.trust_types)
+    _scan(CORRECTION_PATTERNS,               sig.correction_types)
+    _scan(PREFERENCE_PATTERNS,               sig.preference_types)
+    _scan(PERSUASION_PATTERNS,               sig.persuasion_types)
+    _scan(METHODOLOGY_CHALLENGE_PATTERNS,    sig.methodology_types)
+    _scan(KNOWLEDGE_BOUNDARY_PATTERNS,       sig.knowledge_boundary_types)
+    _scan(STAKEHOLDER_CONTEXT_PATTERNS,      sig.stakeholder_types)
+    _scan(DECISION_PATTERN_PATTERNS,         sig.decision_types)
+    _scan(FRUSTRATION_PATTERNS,              sig.frustration_types)
+    _scan(TRUST_CALIBRATION_PATTERNS,        sig.trust_types)
     _scan(ARCHITECTURE_MENTAL_MODEL_PATTERNS, sig.architecture_types)
-    _scan(URGENCY_PATTERNS,                 sig.urgency_types)
-    _scan(QUALITY_BAR_PATTERNS,             sig.quality_types)
-    _scan(AGENCY_PREFERENCE_PATTERNS,       sig.agency_types)
+    _scan(URGENCY_PATTERNS,                  sig.urgency_types)
+    _scan(QUALITY_BAR_PATTERNS,              sig.quality_types)
+    _scan(AGENCY_PREFERENCE_PATTERNS,        sig.agency_types)
+    _scan(TOOL_DIRECTIVE_PATTERNS,           sig.tool_directive_types)
+    _scan(TERMINOLOGY_CORRECTION_PATTERNS,   sig.terminology_types)
+    _scan(FORMAT_PREFERENCE_PATTERNS,        sig.format_types)
+    _scan(MIP_COMPLIANCE_PATTERNS,           sig.mip_types)
+    _scan(SCOPE_DISAMBIGUATION_PATTERNS,     sig.scope_types)
+    _scan(USER_REDIRECT_PATTERNS,            sig.redirect_types)
+    _scan(MODEL_COST_PATTERNS,               sig.model_cost_types)
 
     for topic, keywords in TOPIC_BUCKETS.items():
         for kw in keywords:

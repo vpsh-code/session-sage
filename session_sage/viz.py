@@ -30,12 +30,29 @@ def _d3_js() -> str:
 # ---------------------------------------------------------------------------
 
 GROUP_COLOURS = {
-    "user":       "#f0c040",   # gold
-    "topic":      "#4a9eff",   # blue
-    "tool":       "#50c878",   # emerald
-    "preference": "#a78bfa",   # violet
-    "correction": "#ff6b6b",   # red-orange
-    "concept":    "#94a3b8",   # slate
+    "user":         "#f0c040",   # gold
+    "topic":        "#4a9eff",   # blue
+    "tool":         "#50c878",   # emerald
+    "preference":   "#a78bfa",   # violet
+    "correction":   "#ff6b6b",   # red-orange
+    "persuasion":   "#fb923c",   # amber — LLM convinced user
+    "methodology":  "#22d3ee",   # cyan — analytical challenges
+    "knowledge":    "#86efac",   # light green — learning moments
+    "stakeholder":  "#fbbf24",   # yellow — audience context
+    "decision":     "#818cf8",   # indigo — decision patterns
+    "frustration":  "#f87171",   # coral — friction triggers
+    "trust":        "#34d399",   # teal — trust calibration
+    "architecture": "#c084fc",   # purple — mental models
+    "urgency":      "#fb7185",   # rose — time pressure
+    "quality":      "#a3e635",   # lime — quality standards
+    "agency":       "#38bdf8",   # sky — autonomy style
+    "compliance":   "#f472b6",   # pink — MIP/label compliance
+    "scope":        "#67e8f9",   # light cyan — scope disambiguation
+    "tool_directive": "#fde68a", # light yellow — tool routing rules
+    "terminology":  "#d8b4fe",   # lavender — term corrections
+    "format":       "#6ee7b7",   # mint — output format preferences
+    "model_cost":   "#fca5a5",   # light red — model cost awareness
+    "concept":      "#94a3b8",   # slate
 }
 
 

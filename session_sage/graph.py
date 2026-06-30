@@ -419,6 +419,131 @@ def build_graph(
         if nid in nodes and topic_id in nodes:
             edges_raw[(nid, topic_id, "RELATED_TO")] = 1
 
+    # ── Behavioural signal nodes (10 types from classify.py) ─────────────
+    # Generic builder: groups signals by sub-label, creates one node per label
+    def _build_signal_nodes(
+        signals: list,
+        bucket_attr: str,
+        group: str,
+        edge_type: str,
+        node_prefix: str,
+        description_template: str,
+    ) -> dict[str, str]:
+        """Build archetype nodes for a behavioural signal bucket.
+        Returns {node_id: sub_label} for cross-signal edge wiring."""
+        bucket: dict[str, list[tuple[str, str, str, int, str]]] = defaultdict(list)
+        for sig in signals:
+            # Bug fix (Opus): dedup sub_labels per signal to prevent edge weight inflation
+            for sub_label in set(getattr(sig, bucket_attr, [])):
+                bucket[sub_label].append((
+                    sub_label,
+                    _short(sig.cleaned_message),
+                    sig.turn.timestamp,
+                    sig.turn.turn_index,
+                    sig.turn.session_id,
+                ))
+        created: dict[str, str] = {}
+        for sub_label, matches in bucket.items():
+            if not matches:
+                continue
+            nid = f"{node_prefix}_{re.sub(r'[^a-z0-9]', '_', sub_label.lower())}"
+            label = sub_label.replace("_", " ").title()
+            timestamps = [m[2] for m in matches]
+            # Bug fix (Opus): dedup source_turns by (session_id, turn_index)
+            seen_turns: set[tuple] = set()
+            source_turns = []
+            for m in matches:
+                key = (m[4], m[3])
+                if key not in seen_turns:
+                    seen_turns.add(key)
+                    source_turns.append({"session_id": m[4], "turn_index": m[3], "timestamp": m[2]})
+                if len(source_turns) == 5:
+                    break
+            n = upsert(GraphNode(
+                id=nid,
+                label=label,
+                group=group,
+                size=max(7, min(22, len(matches) + 5)),
+                count=len(matches),
+                description=description_template.format(n=len(matches)),
+                examples=list(dict.fromkeys(m[1] for m in matches))[:4],
+                first_seen=min(timestamps),
+                last_seen=max(timestamps),
+                source_turns=source_turns,
+            ))
+            edges_raw[("user", nid, edge_type)] += len(matches)
+            created[nid] = sub_label
+        return created
+
+    persuasion_nodes   = _build_signal_nodes(signals, "persuasion_types",         "persuasion",    "DEFERRED_TO",   "persuasion",   "LLM convinced user — {n} instance(s)")
+    methodology_nodes  = _build_signal_nodes(signals, "methodology_types",        "methodology",   "CHALLENGES",    "method",       "Methodology challenge — {n} instance(s)")
+    knowledge_nodes    = _build_signal_nodes(signals, "knowledge_boundary_types", "knowledge",     "LEARNING",      "know",         "Knowledge boundary — {n} instance(s)")
+    stakeholder_nodes  = _build_signal_nodes(signals, "stakeholder_types",        "stakeholder",   "SERVES",        "stake",        "Stakeholder context — {n} instance(s)")
+    decision_nodes     = _build_signal_nodes(signals, "decision_types",           "decision",      "DECIDES",       "decision",     "Decision pattern — {n} instance(s)")
+    frustration_nodes  = _build_signal_nodes(signals, "frustration_types",        "frustration",   "FRUSTRATED_BY", "friction",     "Frustration trigger — {n} instance(s)")
+    trust_nodes        = _build_signal_nodes(signals, "trust_types",              "trust",         "TRUSTS_WHEN",   "trust",        "Trust calibration — {n} instance(s)")
+    arch_nodes         = _build_signal_nodes(signals, "architecture_types",       "architecture",  "THINKS_IN",     "arch",         "Mental model — {n} instance(s)")
+    urgency_nodes      = _build_signal_nodes(signals, "urgency_types",            "urgency",       "URGENT_ABOUT",  "urgency",      "Urgency pattern — {n} instance(s)")
+    quality_nodes      = _build_signal_nodes(signals, "quality_types",            "quality",       "EXPECTS",       "quality",      "Quality standard — {n} instance(s)")
+    agency_nodes       = _build_signal_nodes(signals, "agency_types",             "agency",        "PREFERS_STYLE", "agency",       "Agency preference — {n} instance(s)")
+    tool_dir_nodes     = _build_signal_nodes(signals, "tool_directive_types",     "tool_directive","DIRECTS_TOOL",  "tooldir",      "Tool directive — {n} instance(s)")
+    term_nodes         = _build_signal_nodes(signals, "terminology_types",        "terminology",   "ENFORCES_TERM", "term",         "Terminology rule — {n} instance(s)")
+    format_nodes       = _build_signal_nodes(signals, "format_types",             "format",        "PREFERS_FORMAT","fmt",          "Format preference — {n} instance(s)")
+    mip_nodes          = _build_signal_nodes(signals, "mip_types",                "compliance",    "REQUIRES",      "mip",          "MIP/label compliance — {n} instance(s)")
+    scope_nodes        = _build_signal_nodes(signals, "scope_types",              "scope",         "SCOPES",        "scope",        "Scope disambiguation — {n} instance(s)")
+    redirect_nodes     = _build_signal_nodes(signals, "redirect_types",           "frustration",   "REDIRECTS",     "redirect",     "User redirect — {n} instance(s)")
+    model_nodes        = _build_signal_nodes(signals, "model_cost_types",         "model_cost",    "COSTS_AWARE",   "model",        "Model cost rule — {n} instance(s)")
+
+    # ── Cross-signal edges (per GPT-5.5 design) ───────────────────────────
+    # StakeholderContext → raises QualityStandard
+    for snid in stakeholder_nodes:
+        for qnid in quality_nodes:
+            if snid in nodes and qnid in nodes:
+                edges_raw[(snid, qnid, "RAISES_QUALITY_BAR")] += 1
+
+    # StakeholderContext → creates Urgency
+    for snid in stakeholder_nodes:
+        for unid in urgency_nodes:
+            if snid in nodes and unid in nodes:
+                edges_raw[(snid, unid, "CREATES_URGENCY")] += 1
+
+    # FrustrationTrigger → reduces TrustCalibration
+    for fnid in frustration_nodes:
+        for tnid in trust_nodes:
+            if fnid in nodes and tnid in nodes:
+                edges_raw[(fnid, tnid, "REDUCES_TRUST_IN")] += 1
+
+    # Methodology → requires evidence (TrustCalibration)
+    for mnid in methodology_nodes:
+        for tnid in trust_nodes:
+            if mnid in nodes and tnid in nodes:
+                edges_raw[(mnid, tnid, "REQUIRES_EVIDENCE")] += 1
+
+    # Architecture mental model → informs DecisionPattern
+    for anid in arch_nodes:
+        for dnid in decision_nodes:
+            if anid in nodes and dnid in nodes:
+                edges_raw[(anid, dnid, "INFORMS_DECISION")] += 1
+
+    # AgencyPreference + UrgencyPattern co-signal
+    for agnid in agency_nodes:
+        for unid in urgency_nodes:
+            if agnid in nodes and unid in nodes:
+                edges_raw[(agnid, unid, "MODIFIES_STYLE")] += 1
+
+    # QualityBar + StakeholderContext → topic links
+    quality_topic_links = {
+        "quality_executive_quality": "Volvo Domain",
+        "quality_production_standard": "Data Pipeline",
+        "quality_human_readability": "Excel Output",
+        "quality_precision_standard": "Workforce Metrics",
+    }
+    for qnid, topic in quality_topic_links.items():
+        tid = f"topic_{re.sub(r'[^a-z0-9]', '_', topic.lower())}"
+        if qnid in nodes and tid in nodes:
+            edges_raw[(qnid, tid, "RELATED_TO")] += 1
+
+
     # ── RELATED_TO topic-topic edges via co-occurrence ────────────────────
     topic_co: dict[tuple[str, str], int] = defaultdict(int)
     for sig in signals:
