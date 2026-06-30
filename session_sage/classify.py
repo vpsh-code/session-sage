@@ -157,8 +157,8 @@ KNOWLEDGE_BOUNDARY_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 STAKEHOLDER_CONTEXT_PATTERNS: list[tuple[re.Pattern, str]] = [
-    # Tightened (GPT-5.5): require audience/presentation context alongside exec mentions
-    (re.compile(r"\b(?:c[- ]?suite|hrlt|chro|cfo|ceo|coo)\b|\b(?:senior\s+leadership|exec(?:utive)?s?)\b.{0,40}\b(?:audience|ready|review|presentation|will\s+ask|care\s+about|stakeholder|brief|handoff|deck|meeting)\b", re.I), "executive_audience"),
+    # Tightened (GPT-5.5 R6): ALL exec terms require audience/context — bidirectional proximity
+    (re.compile(r"\b(?:c[- ]?suite|hrlt|chro|cfo|ceo|coo|senior\s+leadership|exec(?:utive)?s?)\b.{0,40}\b(?:audience|ready|review|presentation|will\s+ask|care\s+about|stakeholder|brief|handoff|deck|meeting)\b|\b(?:audience|ready|review|presentation|will\s+ask|care\s+about|stakeholder|brief|handoff|deck|meeting)\b.{0,40}\b(?:c[- ]?suite|hrlt|chro|cfo|ceo|coo|senior\s+leadership|exec(?:utive)?s?)\b", re.I), "executive_audience"),
     (re.compile(r"\b(board|steerco|leadership team|management team)\b", re.I), "formal_audience"),
     (re.compile(r"\b(presenting to|showing to|sharing with|this (will|needs to) go to)\b", re.I), "handoff_context"),
     (re.compile(r"\bpoliticall?y? sensitive\b|\bsensitive topic\b", re.I), "political_sensitivity"),
