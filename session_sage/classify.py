@@ -118,7 +118,8 @@ PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bnever (use|show|include)\b", re.I), "standing_rule"),
     (re.compile(r"\binstead (of|use)\b", re.I), "alternative_preference"),
     (re.compile(r"\bi (prefer|want|need|expect)\b", re.I), "explicit_preference"),
-    (re.compile(r"\b(must|have to) (be|use|include|apply)\b", re.I), "hard_requirement"),
+    # Tightened (GPT-5.5): exclude "must be a bug/mistake/error" — require actionable verb
+    (re.compile(r"\b(must|have to)\s+(?:use|include|apply)\b|\b(?:must|has\s+to|have\s+to)\s+be\s+(?:used|included|applied|shown|present|available|formatted|labell?ed|human[- ]?readable|exact|correct|complete)\b", re.I), "hard_requirement"),
     (re.compile(r"\buse .{1,20} not .{1,20}\b", re.I), "tool_preference"),
     (re.compile(r"\bnot .{1,20}\buse\b.{1,20}\binstead\b", re.I), "tool_preference"),
     (re.compile(r"\b(org|level) (l?2|two)\b", re.I), "org_level_preference"),
@@ -187,8 +188,8 @@ FRUSTRATION_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 TRUST_CALIBRATION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bare you sure\b|\bdouble[- ]?check\b|\bsanity[- ]?check\b", re.I), "confidence_probe"),
-    # Tightened (Opus): require output-noun context; bare "verify" fires on "verify installation"
-    (re.compile(r"\bverify\s+(the\s+)?(answer|result|output|number|count|claim|finding|math|total)s?\b|\bvalidate\s+(this|that|the\s+(answer|result|output|finding))\b|\bconfirm\s+(this|that|it|the\s+(number|answer|result|count))\b|\bdouble[- ]?check\s+(this|that|the|your)\b", re.I), "verification_request"),
+    # Tightened (GPT-5.5): require output noun for ALL verbs; "validate this" alone is too broad
+    (re.compile(r"\bverify\s+(the\s+)?(answer|result|output|number|count|claim|finding|math|total)s?\b|\bvalidate\s+the\s+(answer|result|output|finding)s?\b|\bconfirm\s+(the\s+)?(number|answer|result|count)\b|\bdouble[- ]?check\s+(the|your)\s+(answer|result|output|number|count)\b", re.I), "verification_request"),
     (re.compile(r"\bdon'?t (guess|hallucinate|assume|make up)\b", re.I), "anti_hallucination"),
     (re.compile(r"\bread (the )?(file|docs?|source|schema) first\b", re.I), "source_first"),
     (re.compile(r"\bprove it\b|\bshow (me )?(proof|evidence|source)\b", re.I), "proof_demand"),
@@ -202,7 +203,8 @@ ARCHITECTURE_MENTAL_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bend[- ]?to[- ]?end\b|\bpipeline\b", re.I), "pipeline_model"),
     (re.compile(r"\btyped\b.*\b(schema|model|entity|signal)\b", re.I), "typed_model"),
     (re.compile(r"\bknowledge graph\b|\bgraph (model|structure|nodes?)\b", re.I), "graph_model"),
-    (re.compile(r"\babstraction\b|\binterface\b|\bcontract\b", re.I), "abstraction_boundary"),
+    # Tightened (Opus): "interface" alone fires on every UI/API mention; require qualifier
+    (re.compile(r"\b(?:leaky|clean|proper|right|wrong)\s+abstraction\b|\babstraction\s+(?:boundary|layer|leak)\b|\binterface\s+(?:boundary|contract|between)\b|\b(?:respect|cross|violate)\s+(?:the\s+)?(?:abstraction|interface|contract|boundary)\b", re.I), "abstraction_boundary"),
     (re.compile(r"\bseparate (concerns?|layers?|logic|from)\b", re.I), "separation_of_concerns"),
     (re.compile(r"\bnot just a keyword matcher\b|\bintelligent system\b", re.I), "semantic_intelligence"),
     (re.compile(r"\breusable\b|\bgenerali[sz]able\b", re.I), "reuse_scale"),
@@ -210,7 +212,8 @@ ARCHITECTURE_MENTAL_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
 
 URGENCY_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(asap|urgent|immediately|right now)\b", re.I), "immediate_urgency"),
-    (re.compile(r"\b(today|tonight|this morning|this afternoon)\b", re.I), "same_day_deadline"),
+    # Tightened (Opus): require deadline framing — "today" alone fires on "today's data"
+    (re.compile(r"\b(?:by|before|due|needs?\s+(?:it|this)\s+by|deadline\s+(?:is\s+)?)\s+(?:today|tonight|this\s+morning|this\s+afternoon|eod)\b|\b(?:today|tonight)\s+(?:by|at)\s+\d", re.I), "same_day_deadline"),
     (re.compile(r"\bbefore (the )?(meeting|call|review|presentation)\b", re.I), "event_deadline"),
     (re.compile(r"\btime[- ]sensitive\b|\bdeadline\b", re.I), "time_sensitivity"),
     (re.compile(r"\b(eod|end of (day|week))\b", re.I), "eod_deadline"),
@@ -232,8 +235,8 @@ QUALITY_BAR_PATTERNS: list[tuple[re.Pattern, str]] = [
 AGENCY_PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bdon'?t (ask|wait for) (me|permission|confirmation)\b", re.I), "no_permission_loop"),
     (re.compile(r"\bmake (reasonable )?assumptions\b", re.I), "assumption_autonomy"),
-    # Tightened: "do it" alone is too broad; require proceed/go-ahead or explicit suffix
-    (re.compile(r"\b(?:proceed|go ahead)\b|\bjust\s+(?:do|fix|run|ship|implement)\s+it\b|\bdo it\s+(?:now|autonomously|without asking)\b", re.I), "execution_autonomy"),
+    # Tightened (GPT-5.5): exclude "don't proceed", "before you proceed" — require explicit autonomy framing
+    (re.compile(r"\bgo\s+ahead\s+(?:and\s+)?\w+|\bjust\s+(?:go\s+ahead|proceed)\b|\bplease\s+proceed\b|\bjust\s+(?:do|fix|run|ship|implement)\s+it\b|\bdo\s+it\s+(?:now|autonomously|without\s+asking)\b", re.I), "execution_autonomy"),
     (re.compile(r"\bchallenge (me|the methodology|the assumption|my)\b", re.I), "challenge_expected"),
     (re.compile(r"\b(be concise|short answer|brief(ly)?|≤\s*\d+ words?)\b", re.I), "conciseness"),
     (re.compile(r"\bdon'?t over[- ]?explain\b|\bskip the explanation\b", re.I), "low_explanation"),
@@ -246,8 +249,10 @@ AGENCY_PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
 # ---------------------------------------------------------------------------
 
 TOOL_DIRECTIVE_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\b(use|run)\s+\w+\s+(not|instead of)\s+\w+\b", re.I), "tool_directive"),
-    (re.compile(r"\bnever\s+(use|run|call)\s+\w+\b", re.I), "tool_prohibition"),
+    # Tightened (Opus): require a known tool name, not any word pair
+    (re.compile(r"\b(use|run)\s+[\w./_-]*(wf_duck|wf_query|wf_extract|sf\.py|nsc_harness|snowflake|duckdb|markitdown)[\w./_-]*\s+(not|instead\s+of)\s+\w+\b", re.I), "tool_directive"),
+    # Tightened (GPT-5.5): require known tool name to prevent "never use global variables"
+    (re.compile(r"\bnever\s+(use|run|call)\s+(wf_duck|wf_query|wf_extract|sf\.py|nsc_harness|snowflake|duckdb|markitdown|opus|gpt|claude|sonnet)\b", re.I), "tool_prohibition"),
     (re.compile(r"\balways\s+(use|run|call)\s+(wf_duck|snowflake|sf\.py|nsc_harness)\b", re.I), "tool_mandate"),
 ]
 
@@ -256,7 +261,8 @@ TERMINOLOGY_CORRECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\bdon'?t\s+(call|say)\s+(it|that)\b", re.I), "term_correction"),
     (re.compile(r"\bnever\s+(call|say|use)\s+['\"]?\w+['\"]?\b.{0,30}\b(instead|use)\b", re.I), "term_correction"),
     (re.compile(r"\bcorrect\s+term\s+is\b|\bshould be called\b", re.I), "term_correction"),
-    (re.compile(r"\bworker id\b|\bglobal id\b|\bcdsid\b.{0,20}\b(not|never|don.?t)\b", re.I), "id_terminology"),
+    # Tightened (GPT-5.5): require the negative context ("not", "never") to fire on worker id
+    (re.compile(r"\bworker\s+id\b.{0,40}\b(not|never|don.?t|instead)\b|\b(not|never|don.?t)\b.{0,40}\bworker\s+id\b|\bcdsid\b.{0,20}\b(not|never|don.?t)\b|\bglobal\s+id\b.{0,20}\b(not|never|don.?t)\b", re.I), "id_terminology"),
     (re.compile(r"\bquestion topic\b.{0,20}\b(not|never)\b.{0,20}\bdimension\b", re.I), "dimension_terminology"),
 ]
 
@@ -282,8 +288,10 @@ SCOPE_DISAMBIGUATION_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 USER_REDIRECT_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"^(no[,.]?\s|wrong[,.]?\s|that'?s wrong|stop\s)", re.I | re.M), "direct_redirect"),
-    (re.compile(r"\bi\s+(said|asked|told you|mentioned)\b", re.I), "reminder_redirect"),
+    # Fix (Opus+GPT-5.5): \A anchor to start-of-string only; exclude "no problem", "no worries", "not"
+    (re.compile(r"\A\s*(no[,.](?!\s*(problem|worries|issue|worries))|wrong[,.]\s|that'?s\s+wrong[,.\s]|stop[,.]?\s)", re.I), "direct_redirect"),
+    # Fix (Opus): require prior-state adverb or direct-object frame to avoid FP
+    (re.compile(r"\bi\s+(already\s+)?(said|asked|told\s+you|mentioned)\b.{0,60}\b(already|again|before|earlier)\b|\b(as|like)\s+i\s+(said|asked|mentioned)\b|\bi\s+(just\s+)?(told\s+you|asked\s+you\s+to)\b", re.I), "reminder_redirect"),
     (re.compile(r"\bdid\s+i\s+ask\b|\bnot\s+what\s+i\s+(asked|wanted|said|meant)\b", re.I), "explicit_mismatch"),
 ]
 
@@ -303,12 +311,18 @@ def _is_pasted_prompt(text: str) -> bool:
     """Return True if this turn looks like a pasted external prompt, not the user's own words."""
     if len(text) < 400:
         return False
-    t = text.lower()
-    return (
-        t.startswith("you are a") or t.startswith("you are an")
-        or (t.count("\n") > 15 and ("## " in text or "```" in text))
-        or bool(re.search(r"^#{1,3} \w", text, re.M))
-    )
+    text_stripped = text.lstrip()
+    # "You are a/an ..." or "You're a/an ..." framing
+    if re.match(r"(?i)^you(\s+are|'re)\s+an?\b", text_stripped):
+        return True
+    # Code block + many newlines → pasted technical prompt
+    if text.count("\n") >= 15 and "```" in text:
+        return True
+    # Fix (GPT-5.5): markdown headings alone is too broad; require system-prompt keywords too
+    if (re.search(r"(?im)^#{1,3}\s+(?:system|developer|instructions?|role|task|prompt|constraints?|output\s+format)\b", text)
+            and re.search(r"(?i)\b(you\s+are|act\s+as|your\s+task\s+is|follow\s+these\s+instructions)\b", text)):
+        return True
+    return False
 
 
 
