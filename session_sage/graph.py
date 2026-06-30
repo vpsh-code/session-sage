@@ -42,57 +42,88 @@ from .extract import SessionMeta
 # ---------------------------------------------------------------------------
 
 PREFERENCE_ARCHETYPES: list[tuple[re.Pattern, str, str]] = [
-    (re.compile(r"org.{0,10}l?2|org.{0,10}level.{0,5}2|business unit", re.I),
+    # Scan ALL turns — implicit use is evidence of preference, not just explicit declarations.
+    # Min count ≥ 2 enforced at build time to avoid single-turn noise.
+    (re.compile(r"org.{0,10}l?2\b|org.{0,10}level.{0,5}2|business unit", re.I),
      "pref_org_l2", "Always Org Level 2"),
-    # xlsx preference: require preference signal context (not bare Excel mention)
-    (re.compile(r"(output|format|save|export|generate|write).{0,20}(xlsx|excel|workbook)", re.I),
+    # Any .xlsx mention — output format choice is implicit evidence
+    (re.compile(r"\.xlsx\b|output.{0,20}xlsx|xlsx.{0,20}output|save.{0,20}xlsx|generate.{0,20}xlsx", re.I),
      "pref_xlsx_output", "Output as .xlsx"),
     (re.compile(r"muted|accessible.{0,20}(colour|color|palette)|palette.{0,20}(muted|accessible)", re.I),
      "pref_muted_colours", "Muted accessible colour palette"),
     (re.compile(r"autofit|auto.?fit.{0,15}(column|width)", re.I),
      "pref_autofit", "Autofit column widths"),
-    # wf_duck preference: require explicit comparison or instruction context
-    (re.compile(r"(use|prefer|should use).{0,20}wf_duck|wf_duck.{0,20}(not|instead of).{0,20}wf_metrics", re.I),
-     "pref_wf_duck_primary", "wf_duck.py over wf_metrics.py"),
-    (re.compile(r"(proprietary|mip|sensitivity|label).{0,40}(always|standing|instruction|rule)", re.I),
+    # Any wf_duck mention = evidence of preference (it's your primary tool)
+    (re.compile(r"\bwf_duck\b", re.I),
+     "pref_wf_duck_primary", "wf_duck.py as primary workforce tool"),
+    # Any mip/proprietary label mention — implicit compliance preference
+    (re.compile(r"\b(mip|proprietary.{0,10}label|sensitivity.{0,10}label|apply.{0,20}label)\b", re.I),
      "pref_mip_label", "Apply MIP Proprietary label"),
-    (re.compile(r"(named sheet|sheet name|clear header|human.?readable.{0,20}(sheet|output))", re.I),
+    # Sheet naming — People Reporting Data is the canonical sheet name
+    (re.compile(r"named sheet|sheet name|human.?readable.{0,20}sheet|people reporting data", re.I),
      "pref_named_sheets", "Human-readable sheet names"),
-    (re.compile(r"autofilter|auto.?filter.{0,15}(enabled|on all|every)", re.I),
+    (re.compile(r"\bautofilter\b|auto.?filter.{0,15}(enabled|on|every|all)", re.I),
      "pref_autofilter", "AutoFilter on all tables"),
-    (re.compile(r"co.?authored.?by|commit.{0,20}trailer", re.I),
+    # co-authored-by — any commit trailer mention
+    (re.compile(r"co.?authored.?by|commit.{0,20}trailer|223556219", re.I),
      "pref_coauthor", "Co-authored-by in every commit"),
-    (re.compile(r"(both|dual).{0,20}(github|forgejo|remote)|two.{0,10}remote", re.I),
+    # Dual remotes — any co-mention of both services
+    (re.compile(r"(github.{0,80}forgejo|forgejo.{0,80}github)|(both|dual).{0,20}remote", re.I),
      "pref_dual_remote", "Dual git remotes (GitHub + Forgejo)"),
-    (re.compile(r"cdsid.{0,40}(not|never|instead).{0,20}worker.{0,10}id", re.I),
+    # CDSID — any use of the preferred term (not just when contrasting)
+    (re.compile(r"\bcdsid\b", re.I),
      "pref_cdsid_term", "Use 'CDSID' not 'Worker ID'"),
-    (re.compile(r"question topic.{0,20}(not|never|instead).{0,20}dimension", re.I),
+    # Question Topic — any use of the preferred term
+    (re.compile(r"\bquestion.{0,5}topic\b", re.I),
      "pref_question_topic", "Use 'Question Topic' not 'Dimension'"),
-    (re.compile(r"(literal|actual).{0,20}percent|percentages?.{0,20}literal|21\.9.{0,10}not.{0,10}0\.", re.I),
+    # Literal percentages — explicit or by example (21.9 not 0.219)
+    (re.compile(r"(literal|actual).{0,20}percent|percentage.{0,20}literal|\b21\.9\b.{0,15}(not|vs).{0,10}0\.", re.I),
      "pref_literal_pct", "Percentages as literals (21.9 not 0.219)"),
+    # Concise responses — stated style preference
+    (re.compile(r"(keep.{0,20}(concise|brief|short)|don.?t.{0,20}(repeat|summarise|explain again)|less.{0,20}(verbose|explanation))", re.I),
+     "pref_concise_output", "Concise responses, no repetition"),
+    # No markdown in terminal output
+    (re.compile(r"no.{0,20}markdown|plain.{0,10}(text|output)|don.?t.{0,20}(use|add).{0,20}markdown", re.I),
+     "pref_no_markdown", "Plain text, no markdown in output"),
+    # uv over pip/python direct
+    (re.compile(r"\buv\s+run\b|\buv\s+pip\b|use\s+uv\b", re.I),
+     "pref_uv_runner", "Use uv to run scripts"),
+    # Snowflake as fallback only
+    (re.compile(r"snowflake.{0,30}(fallback|only|last resort)|duckdb.{0,30}(first|primary|prefer)", re.I),
+     "pref_duckdb_first", "DuckDB first, Snowflake as fallback"),
 ]
 
 CORRECTION_ARCHETYPES: list[tuple[re.Pattern, str, str]] = [
-    (re.compile(r"org.{0,20}(l1|level.{0,5}1).{0,40}(should|wrong|not|instead)", re.I),
-     "corr_org_level", "Org Level: L2 not L1"),
-    (re.compile(r"(mip|proprietary|label|sensitivity).{0,60}(not done|forgot|missed|why|standing instruction)", re.I),
+    # Scan ALL turns — corrections are often brief, don't need the is_correction gate.
+    (re.compile(r"org.{0,30}(l1|level.{0,5}1)", re.I),
+     "corr_org_level", "Org Level: defaulted to L1 instead of L2"),
+    (re.compile(r"(mip|proprietary|label|sensitivity).{0,60}(not done|forgot|missed|remind|why.{0,20}not|standing.{0,20}(instruction|rule)|always|every.{0,10}(file|xlsx|time))", re.I),
      "corr_mip_label", "MIP label: forgot to apply"),
-    (re.compile(r"(wf_metrics|hand.?craft|hand.?written sql).{0,40}(wrong|not|never|avoid|don.t)", re.I),
-     "corr_wrong_tool", "Used wrong tool (wf_metrics / hand-SQL)"),
-    (re.compile(r"(americas|region).{0,40}(geographic|geographical|not what i meant|i did not mean)", re.I),
-     "corr_americas_intent", "Ambiguous 'region' → org node not geography"),
-    (re.compile(r"not (current|latest|up.?to.?date)\b", re.I),
-     "corr_stale_data", "Returned stale data instead of current"),
-    (re.compile(r"(model|month model|people.?master).{0,40}(not aware|super concerned|missing|3.{0,5}model)", re.I),
-     "corr_data_model_gap", "Agent unaware of data model (MONTH/PEOPLE_MASTER)"),
-    (re.compile(r"only.{0,25}(xlsx|excel|one).{0,20}attach", re.I),
+    (re.compile(r"(wf_metrics|hand.?craft|hand.?written.{0,10}sql|hand.?roll)", re.I),
+     "corr_wrong_tool", "Used wf_metrics or hand-crafted SQL instead of wf_duck"),
+    (re.compile(r"(americas|region).{0,60}(geographic|geographical|not what i meant|i did not mean|org.{0,10}node)", re.I),
+     "corr_americas_intent", "Ambiguous 'region' — meant org node, not geography"),
+    (re.compile(r"\bnot\s+(current|latest|up.?to.?date)\b|\b(stale|old).{0,20}data\b", re.I),
+     "corr_stale_data", "Returned stale data instead of current snapshot"),
+    (re.compile(r"(month.{0,10}model|people.?master|snapshot.{0,20}month|snap.?date).{0,60}(not aware|super concerned|missing|didn.?t|forgot|all.{0,5}(3|three).{0,10}model)", re.I),
+     "corr_data_model_gap", "Agent unaware of MONTH/PEOPLE_MASTER data model"),
+    (re.compile(r"only.{0,30}(xlsx|excel|one|single).{0,30}attach|attach.{0,30}(not all|missing|only one)", re.I),
      "corr_single_attach", "Only one attachment sent instead of all"),
-    (re.compile(r"worker.?id.{0,30}(not|never|should|cdsid)", re.I),
-     "corr_worker_id_term", "Used 'Worker ID' — should be CDSID"),
-    (re.compile(r"(after all.{0,20}sessions|super concerned.{0,40}sessions|still not.{0,40}after)", re.I),
+    (re.compile(r"\bworker.?id\b", re.I),
+     "corr_worker_id_term", "Used 'Worker ID' — correct term is CDSID"),
+    (re.compile(r"(after all.{0,30}sessions|super concerned.{0,60}sessions|keep.{0,20}(forgetting|missing)|every.{0,20}session.{0,20}(same|again))", re.I),
      "corr_repeated_miss", "Repeated failure across many sessions"),
-    (re.compile(r"\bdimension\b.{0,30}(question topic|should be)", re.I),
+    (re.compile(r"\bdimension\b(?!.{0,5}(al|s\b|ality))", re.I),
      "corr_dimension_term", "Used 'Dimension' — should be 'Question Topic'"),
+    # New: wrong org scope (national vs global)
+    (re.compile(r"(national|sweden|nordic|global).{0,40}(not what|wrong scope|i meant|i asked for)", re.I),
+     "corr_org_scope", "Wrong org scope (national vs global)"),
+    # New: model selection error
+    (re.compile(r"(opus|gpt.?4o?|expensive.{0,20}model).{0,40}(don.?t|never|not|avoid|shouldn.?t)", re.I),
+     "corr_model_choice", "Used expensive model when cheaper was sufficient"),
+    # New: output format error
+    (re.compile(r"(json|csv|markdown).{0,40}(not what i|should be|i wanted|i asked).{0,20}(xlsx|excel|table)", re.I),
+     "corr_output_format", "Returned wrong format (JSON/CSV instead of xlsx)"),
 ]
 
 
@@ -309,12 +340,10 @@ def build_graph(
                     edges_raw[("user", topic_id, "WORKS_ON")] += 0.5
 
     # ── Preference archetype nodes ────────────────────────────────────────
-    # Only match turns that carry a preference or correction signal to reduce false positives
-    pref_matches: dict[str, list[tuple[str, str, str, int, str]]] = defaultdict(list)  # node_id → [(label, excerpt, timestamp, turn_idx, session_id)]
+    # Scan ALL turns — implicit use is evidence of a standing preference.
+    pref_matches: dict[str, list[tuple[str, str, str, int, str]]] = defaultdict(list)
 
     for sig in signals:
-        if not sig.is_preference and not sig.is_correction:
-            continue
         msg_lower = sig.cleaned_message.lower()
         for pattern, node_id, label in PREFERENCE_ARCHETYPES:
             if pattern.search(msg_lower):
@@ -326,9 +355,9 @@ def build_graph(
                     sig.turn.session_id,
                 ))
 
-    # Only create nodes with at least 1 match
+    # Require ≥2 matches to filter single-turn noise
     for node_id, matches in pref_matches.items():
-        if not matches:
+        if len(matches) < 2:
             continue
         label = matches[0][0]
         timestamps = [m[2] for m in matches]
@@ -350,11 +379,10 @@ def build_graph(
         edges_raw[("user", node_id, "PREFERS")] += len(matches)
 
     # ── Correction archetype nodes ────────────────────────────────────────
+    # Scan ALL turns — corrections are brief and often lack explicit correction language.
     corr_matches: dict[str, list[tuple[str, str, str, int, str]]] = defaultdict(list)
 
     for sig in signals:
-        if not sig.is_correction:
-            continue
         msg_lower = sig.cleaned_message.lower()
         for pattern, node_id, label in CORRECTION_ARCHETYPES:
             if pattern.search(msg_lower):
