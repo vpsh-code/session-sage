@@ -32,105 +32,9 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .classify import TurnSignal, _clean_message
+from .discover import discover_all
 from .extract import SessionMeta
 
-
-# ---------------------------------------------------------------------------
-# Preference / Correction archetypes
-# Each entry: (pattern_on_lowercased_user_message, node_id, label)
-# Patterns intentionally specific — broad patterns are false positive magnets.
-# ---------------------------------------------------------------------------
-
-PREFERENCE_ARCHETYPES: list[tuple[re.Pattern, str, str]] = [
-    # Scan ALL turns — implicit use is evidence of preference, not just explicit declarations.
-    # Min count ≥ 2 enforced at build time to avoid single-turn noise.
-    (re.compile(r"org.{0,10}l?2\b|org.{0,10}level.{0,5}2|business unit", re.I),
-     "pref_org_l2", "Always Org Level 2"),
-    # Any .xlsx mention — output format choice is implicit evidence
-    (re.compile(r"\.xlsx\b|output.{0,20}xlsx|xlsx.{0,20}output|save.{0,20}xlsx|generate.{0,20}xlsx", re.I),
-     "pref_xlsx_output", "Output as .xlsx"),
-    (re.compile(r"muted|accessible.{0,20}(colour|color|palette)|palette.{0,20}(muted|accessible)", re.I),
-     "pref_muted_colours", "Muted accessible colour palette"),
-    (re.compile(r"autofit|auto.?fit.{0,15}(column|width)", re.I),
-     "pref_autofit", "Autofit column widths"),
-    # Any wf_duck mention = evidence of preference (it's your primary tool)
-    (re.compile(r"\bwf_duck\b", re.I),
-     "pref_wf_duck_primary", "wf_duck.py as primary workforce tool"),
-    # Any mip/proprietary label mention — implicit compliance preference
-    (re.compile(r"\b(mip|proprietary.{0,10}label|sensitivity.{0,10}label|apply.{0,20}label)\b", re.I),
-     "pref_mip_label", "Apply MIP Proprietary label"),
-    # Sheet naming — People Reporting Data is the canonical sheet name
-    (re.compile(r"named sheet|sheet name|human.?readable.{0,20}sheet|people reporting data", re.I),
-     "pref_named_sheets", "Human-readable sheet names"),
-    (re.compile(r"\bautofilter\b|auto.?filter.{0,15}(enabled|on|every|all)", re.I),
-     "pref_autofilter", "AutoFilter on all tables"),
-    # co-authored-by — any commit trailer mention
-    (re.compile(r"co.?authored.?by|commit.{0,20}trailer|223556219", re.I),
-     "pref_coauthor", "Co-authored-by in every commit"),
-    # Dual remotes — any co-mention of both services
-    (re.compile(r"(github.{0,80}forgejo|forgejo.{0,80}github)|(both|dual).{0,20}remote", re.I),
-     "pref_dual_remote", "Dual git remotes (GitHub + Forgejo)"),
-    # CDSID — any use of the preferred term (not just when contrasting)
-    (re.compile(r"\bcdsid\b", re.I),
-     "pref_cdsid_term", "Use 'CDSID' not 'Worker ID'"),
-    # Question Topic — any use of the preferred term
-    (re.compile(r"\bquestion.{0,5}topic\b", re.I),
-     "pref_question_topic", "Use 'Question Topic' not 'Dimension'"),
-    # Literal percentages — explicit or by example (21.9 not 0.219)
-    (re.compile(r"(literal|actual).{0,20}percent|percentage.{0,20}literal|\b21\.9\b.{0,15}(not|vs).{0,10}0\.", re.I),
-     "pref_literal_pct", "Percentages as literals (21.9 not 0.219)"),
-    # Concise responses — stated style preference
-    (re.compile(r"(keep.{0,20}(concise|brief|short)|don.?t.{0,20}(repeat|summarise|explain again)|less.{0,20}(verbose|explanation))", re.I),
-     "pref_concise_output", "Concise responses, no repetition"),
-    # No markdown in terminal output
-    (re.compile(r"no.{0,20}markdown|plain.{0,10}(text|output)|don.?t.{0,20}(use|add).{0,20}markdown", re.I),
-     "pref_no_markdown", "Plain text, no markdown in output"),
-    # uv over pip/python direct
-    (re.compile(r"\buv\s+run\b|\buv\s+pip\b|use\s+uv\b", re.I),
-     "pref_uv_runner", "Use uv to run scripts"),
-    # Snowflake as fallback only
-    (re.compile(r"snowflake.{0,30}(fallback|only|last resort)|duckdb.{0,30}(first|primary|prefer)", re.I),
-     "pref_duckdb_first", "DuckDB first, Snowflake as fallback"),
-    # ~/Projects/ as canonical code location — any code/project reference anchored there
-    (re.compile(r"~/projects/|home.{0,10}projects.{0,10}folder|projects\s+folder|in\s+projects\b", re.I),
-     "pref_projects_folder", "~/Projects/ is the canonical code home"),
-    # Output stays inside its own project — not in Downloads or excel folder
-    (re.compile(r"(output|reports?|results?).{0,30}(inside|within|in\s+the)\s+(project|repo)|not.{0,20}downloads?", re.I),
-     "pref_output_in_project", "Outputs belong inside the project folder"),
-]
-
-CORRECTION_ARCHETYPES: list[tuple[re.Pattern, str, str]] = [
-    # Scan ALL turns — corrections are often brief, don't need the is_correction gate.
-    (re.compile(r"org.{0,30}(l1|level.{0,5}1)", re.I),
-     "corr_org_level", "Org Level: defaulted to L1 instead of L2"),
-    (re.compile(r"(mip|proprietary|label|sensitivity).{0,60}(not done|forgot|missed|remind|why.{0,20}not|standing.{0,20}(instruction|rule)|always|every.{0,10}(file|xlsx|time))", re.I),
-     "corr_mip_label", "MIP label: forgot to apply"),
-    (re.compile(r"(wf_metrics|hand.?craft|hand.?written.{0,10}sql|hand.?roll)", re.I),
-     "corr_wrong_tool", "Used wf_metrics or hand-crafted SQL instead of wf_duck"),
-    (re.compile(r"(americas|region).{0,60}(geographic|geographical|not what i meant|i did not mean|org.{0,10}node)", re.I),
-     "corr_americas_intent", "Ambiguous 'region' — meant org node, not geography"),
-    (re.compile(r"\bnot\s+(current|latest|up.?to.?date)\b|\b(stale|old).{0,20}data\b", re.I),
-     "corr_stale_data", "Returned stale data instead of current snapshot"),
-    (re.compile(r"(month.{0,10}model|people.?master|snapshot.{0,20}month|snap.?date).{0,60}(not aware|super concerned|missing|didn.?t|forgot|all.{0,5}(3|three).{0,10}model)", re.I),
-     "corr_data_model_gap", "Agent unaware of MONTH/PEOPLE_MASTER data model"),
-    (re.compile(r"only.{0,30}(xlsx|excel|one|single).{0,30}attach|attach.{0,30}(not all|missing|only one)", re.I),
-     "corr_single_attach", "Only one attachment sent instead of all"),
-    (re.compile(r"\bworker.?id\b", re.I),
-     "corr_worker_id_term", "Used 'Worker ID' — correct term is CDSID"),
-    (re.compile(r"(after all.{0,30}sessions|super concerned.{0,60}sessions|keep.{0,20}(forgetting|missing)|every.{0,20}session.{0,20}(same|again))", re.I),
-     "corr_repeated_miss", "Repeated failure across many sessions"),
-    (re.compile(r"\bdimension\b(?!.{0,5}(al|s\b|ality))", re.I),
-     "corr_dimension_term", "Used 'Dimension' — should be 'Question Topic'"),
-    # New: wrong org scope (national vs global)
-    (re.compile(r"(national|sweden|nordic|global).{0,40}(not what|wrong scope|i meant|i asked for)", re.I),
-     "corr_org_scope", "Wrong org scope (national vs global)"),
-    # New: model selection error
-    (re.compile(r"(opus|gpt.?4o?|expensive.{0,20}model).{0,40}(don.?t|never|not|avoid|shouldn.?t)", re.I),
-     "corr_model_choice", "Used expensive model when cheaper was sufficient"),
-    # New: output format error
-    (re.compile(r"(json|csv|markdown).{0,40}(not what i|should be|i wanted|i asked).{0,20}(xlsx|excel|table)", re.I),
-     "corr_output_format", "Returned wrong format (JSON/CSV instead of xlsx)"),
-]
 
 
 # ---------------------------------------------------------------------------
@@ -195,263 +99,132 @@ def build_graph(
         if not node.last_seen or timestamp > node.last_seen:
             node.last_seen = timestamp
 
-    # ── User node ────────────────────────────────────────────────────────
+    # ── Run statistical discovery — no hardcoded archetypes ───────────────
+    dk = discover_all(sessions, signals)
+
+    # ── User node — description derived from data, not hardcoded ────────────
+    top_tool = dk.tools[0].name if dk.tools else "unknown"
+    top_pref = dk.preferences[0].phrase if dk.preferences else ""
     user_node = GraphNode(
         id="user",
         label="You",
         group="user",
         size=40,
         count=len(sessions),
-        description="People analytics professional — Volvo Cars",
+        description=(
+            f"{len(sessions)} sessions · {dk.total_turns} turns · "
+            f"top tool: {top_tool}"
+        ),
         first_seen=sessions[0].created_at if sessions else "",
         last_seen=sessions[-1].created_at if sessions else "",
         metadata={
             "total_sessions": len(sessions),
-            "total_turns": len(signals),
+            "total_turns": dk.total_turns,
+            "top_tool": top_tool,
+            "top_preference": top_pref,
         },
     )
     upsert(user_node)
 
-    # ── Topic nodes — frequency from session summaries, turns, checkpoints ──
-    topic_sessions: dict[str, list[str]] = defaultdict(list)   # topic → [session_id]
-    topic_timestamps: dict[str, list[str]] = defaultdict(list)
-    topic_examples: dict[str, list[str]] = defaultdict(list)
-    topic_source_turns: dict[str, list[dict]] = defaultdict(list)
-
-    from .classify import TOPIC_BUCKETS
-
-    def _check_topic(text: str, session_id: str, timestamp: str, example: str, turn_idx: int = -1):
-        clean_text = _clean_message(text)
-        text_lower = clean_text.lower()
-        clean_example = _short(example)
-        for topic, keywords in TOPIC_BUCKETS.items():
-            for kw in keywords:
-                if kw in text_lower:
-                    topic_sessions[topic].append(session_id)
-                    topic_timestamps[topic].append(timestamp)
-                    if len(topic_examples[topic]) < 6 and clean_example:
-                        topic_examples[topic].append(clean_example)
-                    if len(topic_source_turns[topic]) < 5 and turn_idx >= 0:
-                        topic_source_turns[topic].append(
-                            {"session_id": session_id, "turn_index": turn_idx, "timestamp": timestamp}
-                        )
-                    break
-
-    for s in sessions:
-        if s.summary:
-            clean_summary = _clean_message(s.summary)
-            _check_topic(clean_summary, s.id, s.created_at, clean_summary)
-        for cp in s.checkpoints:
-            for field_text in [cp.title, cp.overview, cp.work_done, cp.technical_details]:
-                if field_text:
-                    # Clean the FULL field before truncating so end-markers are visible
-                    clean_field = _clean_message(field_text)
-                    if clean_field:
-                        _check_topic(clean_field, s.id, cp.created_at, clean_field[:200])
-
-    for sig in signals:
-        for topic in sig.topics:
-            topic_sessions[topic].append(sig.turn.session_id)
-            topic_timestamps[topic].append(sig.turn.timestamp)
-            clean_summary = _short(sig.turn.session_summary or "")
-            if len(topic_examples[topic]) < 6 and clean_summary:
-                topic_examples[topic].append(clean_summary)
-            if len(topic_source_turns[topic]) < 5:
-                topic_source_turns[topic].append({
-                    "session_id": sig.turn.session_id,
-                    "turn_index": sig.turn.turn_index,
-                    "timestamp": sig.turn.timestamp,
-                })
-
-    # Deduplicate session counts per topic
-    topic_unique_sessions: dict[str, set[str]] = defaultdict(set)
-    for topic, sids in topic_sessions.items():
-        topic_unique_sessions[topic].update(sids)
-
-    for topic, sids in topic_unique_sessions.items():
-        timestamps = topic_timestamps[topic]
+    # ── Topic nodes — TF-IDF discovered, labels emerge from data ────────────
+    for topic in dk.topics:
         n = upsert(GraphNode(
-            id=f"topic_{re.sub(r'[^a-z0-9]', '_', topic.lower())}",
-            label=topic,
+            id=topic.id,
+            label=topic.label,
             group="topic",
-            size=max(8, min(35, len(sids) // 2 + 8)),
-            count=len(sids),
-            description=f"Active in {len(sids)} sessions",
-            examples=list(dict.fromkeys(topic_examples[topic]))[:5],
-            first_seen=min(timestamps) if timestamps else "",
-            last_seen=max(timestamps) if timestamps else "",
-            source_turns=topic_source_turns[topic][:5],
+            size=max(8, min(35, topic.session_count // 2 + 8)),
+            count=topic.session_count,
+            description=f"Discovered topic — active in {topic.session_count} sessions",
+            first_seen=topic.first_seen,
+            last_seen=topic.last_seen,
+            metadata={"top_terms": topic.top_terms},
         ))
-        edges_raw[("user", n.id, "WORKS_ON")] += len(sids)
+        edges_raw[("user", n.id, "WORKS_ON")] += topic.session_count
 
-    # ── Tool nodes ───────────────────────────────────────────────────────
-    tool_turns: dict[str, list[TurnSignal]] = defaultdict(list)
-    for sig in signals:
-        for tool in sig.tools:
-            tool_turns[tool].append(sig)
+    # Topic co-occurrence edges via shared TF-IDF terms
+    for i, ti in enumerate(dk.topics):
+        for tj in dk.topics[i + 1:]:
+            shared = len(set(ti.top_terms) & set(tj.top_terms))
+            if shared >= 2:
+                edges_raw[(ti.id, tj.id, "RELATED_TO")] += shared
 
-    for tool, sigs in tool_turns.items():
-        timestamps = [s.turn.timestamp for s in sigs]
+    # ── Tool nodes — syntactically extracted, session-spread ranked ──────────
+    for tool in dk.tools[:25]:
+        nid = f"tool_{re.sub(r'[^a-z0-9]', '_', tool.name.lower())}"
         n = upsert(GraphNode(
-            id=f"tool_{re.sub(r'[^a-z0-9]', '_', tool.lower())}",
-            label=tool,
+            id=nid,
+            label=tool.name,
             group="tool",
-            size=max(6, min(25, len(sigs) // 3 + 6)),
-            count=len(sigs),
-            description=f"Mentioned in {len(sigs)} turns",
-            examples=[_short(s.cleaned_message) for s in sigs[:4]],
-            first_seen=min(timestamps),
-            last_seen=max(timestamps),
-            source_turns=[
-                {"session_id": s.turn.session_id, "turn_index": s.turn.turn_index, "timestamp": s.turn.timestamp}
-                for s in sigs[:5]
-            ],
+            size=max(6, min(25, tool.session_count // 3 + 6)),
+            count=tool.total_count,
+            description=f"Used in {tool.session_count} sessions · {tool.total_count} mentions",
+            examples=tool.examples,
+            first_seen=tool.first_seen,
+            last_seen=tool.last_seen,
         ))
-        edges_raw[("user", n.id, "USES")] += len(sigs)
+        edges_raw[("user", nid, "USES")] += tool.session_count
 
-    # Connect tools to primary topics
-    tool_topic_map = {
-        "wf_duck.py": "DuckDB",
-        "wf_query.py": "Org Structure",
-        "sf.py": "Snowflake / SQL",
-        "nsc_harness.py": "NSC Analytics",
-        "wf_extract.py": "Workforce Metrics",
-        "wf_metrics.py": "Snowflake / SQL",
-        "openpyxl": "Excel Output",
-        "xlsxwriter": "Excel Output",
-        "pandas": "Data Pipeline",
-        "streamlit": "Visualisation",
-        "duckdb": "DuckDB",
-        "snowflake": "Snowflake / SQL",
-    }
-    for tool, topic in tool_topic_map.items():
-        tid = f"tool_{re.sub(r'[^a-z0-9]', '_', tool.lower())}"
-        topic_id = f"topic_{re.sub(r'[^a-z0-9]', '_', topic.lower())}"
-        if tid in nodes and topic_id in nodes:
-            edges_raw[(topic_id, tid, "USES")] += 1
-
-    # ── File extension analysis → topic signals ──────────────────────────
-    ext_topic: dict[str, str] = {
-        ".xlsx": "Excel Output", ".pptx": "PowerPoint / Docs", ".docx": "PowerPoint / Docs",
-        ".py": "Python Scripting", ".sql": "Snowflake / SQL", ".md": "Git / Repos",
-        ".csv": "Data Pipeline", ".json": "Data Pipeline",
-    }
-    for s in sessions:
-        for fp in s.files_touched:
-            suffix = "." + fp.rsplit(".", 1)[-1].lower() if "." in fp else ""
-            topic = ext_topic.get(suffix)
-            if topic:
-                topic_id = f"topic_{re.sub(r'[^a-z0-9]', '_', topic.lower())}"
-                if topic_id in nodes:
-                    edges_raw[("user", topic_id, "WORKS_ON")] += 0.5
-
-    # ── Preference archetype nodes ────────────────────────────────────────
-    # Scan ALL turns — implicit use is evidence of a standing preference.
-    pref_matches: dict[str, list[tuple[str, str, str, int, str]]] = defaultdict(list)
-
-    for sig in signals:
-        msg_lower = sig.cleaned_message.lower()
-        for pattern, node_id, label in PREFERENCE_ARCHETYPES:
-            if pattern.search(msg_lower):
-                pref_matches[node_id].append((
-                    label,
-                    _short(sig.cleaned_message),
-                    sig.turn.timestamp,
-                    sig.turn.turn_index,
-                    sig.turn.session_id,
-                ))
-
-    # Require ≥2 matches to filter single-turn noise
-    for node_id, matches in pref_matches.items():
-        if len(matches) < 2:
-            continue
-        label = matches[0][0]
-        timestamps = [m[2] for m in matches]
+    # ── Path nodes — canonical directories mined from text ──────────────────
+    for path in dk.paths[:12]:
+        nid = f"path_{re.sub(r'[^a-z0-9]', '_', path.root.lower())}"
         n = upsert(GraphNode(
-            id=node_id,
-            label=label,
+            id=nid,
+            label=path.root,
+            group="path",
+            size=max(6, min(20, path.session_count // 2 + 6)),
+            count=path.total_count,
+            description=f"Referenced in {path.session_count} sessions",
+            examples=path.examples,
+        ))
+        edges_raw[("user", nid, "WORKS_IN")] += path.session_count
+
+    # ── Preference nodes — session-spread n-grams, no hardcoded list ────────
+    for pref in dk.preferences[:30]:
+        nid = f"pref_{re.sub(r'[^a-z0-9]', '_', pref.phrase.lower())[:40]}"
+        n = upsert(GraphNode(
+            id=nid,
+            label=pref.phrase.title(),
             group="preference",
-            size=max(8, min(22, len(matches) + 6)),
-            count=len(matches),
-            description=f"Standing preference — {len(matches)} evidence point(s)",
-            examples=list(dict.fromkeys(m[1] for m in matches))[:4],
-            first_seen=min(timestamps),
-            last_seen=max(timestamps),
-            source_turns=[
-                {"session_id": m[4], "turn_index": m[3], "timestamp": m[2]}
-                for m in matches[:5]
-            ],
+            size=max(7, min(22, pref.session_count + 5)),
+            count=pref.session_count,
+            description=(
+                f"Standing preference — {pref.session_count} sessions, "
+                f"{pref.total_count} occurrences"
+            ),
+            examples=pref.examples,
+            first_seen=pref.first_seen,
+            last_seen=pref.last_seen,
+            metadata={"score": round(pref.score, 1)},
         ))
-        edges_raw[("user", node_id, "PREFERS")] += len(matches)
+        edges_raw[("user", nid, "PREFERS")] += pref.session_count
 
-    # ── Correction archetype nodes ────────────────────────────────────────
-    # Scan ALL turns — corrections are brief and often lack explicit correction language.
-    corr_matches: dict[str, list[tuple[str, str, str, int, str]]] = defaultdict(list)
-
-    for sig in signals:
-        msg_lower = sig.cleaned_message.lower()
-        for pattern, node_id, label in CORRECTION_ARCHETYPES:
-            if pattern.search(msg_lower):
-                corr_matches[node_id].append((
-                    label,
-                    _short(sig.cleaned_message),
-                    sig.turn.timestamp,
-                    sig.turn.turn_index,
-                    sig.turn.session_id,
-                ))
-
-    for node_id, matches in corr_matches.items():
-        if not matches:
-            continue
-        label = matches[0][0]
-        timestamps = [m[2] for m in matches]
+    # ── Correction nodes — behavioural detection + content extraction ────────
+    for corr in dk.corrections[:20]:
+        nid = f"corr_{re.sub(r'[^a-z0-9]', '_', corr.subject.lower())[:40]}"
         n = upsert(GraphNode(
-            id=node_id,
-            label=label,
+            id=nid,
+            label=corr.subject.title(),
             group="correction",
-            size=max(8, min(22, len(matches) * 2 + 6)),
-            count=len(matches),
-            description=f"Recurring correction — {len(matches)} occurrence(s)",
-            examples=list(dict.fromkeys(m[1] for m in matches))[:4],
-            first_seen=min(timestamps),
-            last_seen=max(timestamps),
-            source_turns=[
-                {"session_id": m[4], "turn_index": m[3], "timestamp": m[2]}
-                for m in matches[:5]
-            ],
+            size=max(8, min(22, corr.session_count * 2 + 6)),
+            count=corr.count,
+            description=(
+                f"Recurring correction — {corr.count} occurrence(s) "
+                f"across {corr.session_count} session(s)"
+            ),
+            examples=corr.examples,
+            first_seen=corr.first_seen,
+            last_seen=corr.last_seen,
         ))
-        edges_raw[("user", node_id, "CORRECTED")] += len(matches)
+        edges_raw[("user", nid, "CORRECTED")] += corr.count
 
-    # Link pref/corr nodes to relevant topics
-    pref_corr_topic_links: dict[str, str] = {
-        "corr_org_level":       "Org Structure",
-        "corr_mip_label":       "Sensitivity Labels",
-        "corr_wrong_tool":      "Workforce Metrics",
-        "corr_stale_data":      "Workforce Metrics",
-        "corr_data_model_gap":  "Workforce Metrics",
-        "corr_worker_id_term":  "Volvo Domain",
-        "corr_dimension_term":  "Volvo Domain",
-        "corr_single_attach":   "Excel Output",
-        "corr_americas_intent": "Org Structure",
-        "corr_repeated_miss":   "Volvo Domain",
-        "pref_org_l2":          "Org Structure",
-        "pref_xlsx_output":     "Excel Output",
-        "pref_muted_colours":   "Visualisation",
-        "pref_wf_duck_primary": "DuckDB",
-        "pref_mip_label":       "Sensitivity Labels",
-        "pref_named_sheets":    "Excel Output",
-        "pref_dual_remote":     "Git / Repos",
-        "pref_coauthor":        "Git / Repos",
-        "pref_literal_pct":     "Workforce Metrics",
-        "pref_autofit":         "Excel Output",
-        "pref_autofilter":      "Excel Output",
-        "pref_cdsid_term":      "Volvo Domain",
-        "pref_question_topic":  "Volvo Domain",
-    }
-    for nid, topic in pref_corr_topic_links.items():
-        topic_id = f"topic_{re.sub(r'[^a-z0-9]', '_', topic.lower())}"
-        if nid in nodes and topic_id in nodes:
-            edges_raw[(nid, topic_id, "RELATED_TO")] = 1
+    # ── User metadata (data-derived) ─────────────────────────────────────────
+    nodes["user"].metadata.update({
+        "top_topics":    [(t.label, t.session_count) for t in dk.topics[:5]],
+        "top_tools":     [(t.name, t.session_count) for t in dk.tools[:5]],
+        "top_paths":     [(p.root, p.session_count) for p in dk.paths[:3]],
+        "first_session": sessions[0].created_at if sessions else None,
+        "last_session":  sessions[-1].created_at if sessions else None,
+    })
 
     # ── Behavioural signal nodes (10 types from classify.py) ─────────────
     # Generic builder: groups signals by sub-label, creates one node per label
@@ -565,39 +338,12 @@ def build_graph(
             if agnid in nodes and unid in nodes:
                 edges_raw[(agnid, unid, "MODIFIES_STYLE")] += 1
 
-    # QualityBar + StakeholderContext → topic links
-    quality_topic_links = {
-        "quality_executive_quality": "Volvo Domain",
-        "quality_production_standard": "Data Pipeline",
-        "quality_human_readability": "Excel Output",
-        "quality_precision_standard": "Workforce Metrics",
-    }
-    for qnid, topic in quality_topic_links.items():
-        tid = f"topic_{re.sub(r'[^a-z0-9]', '_', topic.lower())}"
-        if qnid in nodes and tid in nodes:
-            edges_raw[(qnid, tid, "RELATED_TO")] += 1
-
-
-    # ── RELATED_TO topic-topic edges via co-occurrence ────────────────────
-    topic_co: dict[tuple[str, str], int] = defaultdict(int)
-    for sig in signals:
-        tids = [f"topic_{re.sub(r'[^a-z0-9]', '_', t.lower())}" for t in sig.topics if f"topic_{re.sub(r'[^a-z0-9]', '_', t.lower())}" in nodes]
-        for i in range(len(tids)):
-            for j in range(i + 1, len(tids)):
-                pair = tuple(sorted([tids[i], tids[j]]))
-                topic_co[pair] += 1  # type: ignore[arg-type]
-
-    for (t1, t2), count in topic_co.items():
-        if count >= 5:  # only meaningful co-occurrences
-            edges_raw[(t1, t2, "RELATED_TO")] += count
-
-    # ── User metadata ─────────────────────────────────────────────────────
-    top_topics = sorted(topic_unique_sessions.items(), key=lambda x: -len(x[1]))[:5]
-    nodes["user"].metadata.update({
-        "top_topics": [(t, len(s)) for t, s in top_topics],
-        "first_session": sessions[0].created_at if sessions else None,
-        "last_session": sessions[-1].created_at if sessions else None,
-    })
+    # QualityBar → most-visited topic (data-derived, not hardcoded)
+    if dk.topics:
+        top_topic_id = dk.topics[0].id
+        for qnid in quality_nodes:
+            if qnid in nodes and top_topic_id in nodes:
+                edges_raw[(qnid, top_topic_id, "RELATED_TO")] += 1
 
     # ── Finalise edge list ────────────────────────────────────────────────
     edges: list[GraphEdge] = [
