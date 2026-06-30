@@ -60,7 +60,8 @@ CORRECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(that'?s? wrong|you('re| are) wrong|was wrong|is wrong)\b", re.I), "factual_error"),
     (re.compile(r"\b(that'?s? incorrect|you('re| are) incorrect)\b", re.I), "factual_error"),
     # Repeated failure — strong signal of persistent issue
-    (re.compile(r"\b(still (not|same|wrong|issue|broken))\b", re.I), "repeated_failure"),
+    # Tightened (Opus): exclude "still not sure", "still not done" — require agent-failure verbs
+    (re.compile(r"\bstill\s+(?:same|wrong|broken|failing)\b|\bstill\s+(?:an?\s+)?(?:issue|problem|error|bug)\b|\bstill\s+not\s+(?:working|fixed|applied|labell?ed|done|correct|right|complete|there|showing|loading|saved|updated|refreshed)\b", re.I), "repeated_failure"),
     (re.compile(r"\bsame issue\b", re.I), "repeated_failure"),
     (re.compile(r"\bafter all the (many )?sessions\b", re.I), "accumulated_frustration"),
     # Partial result — output was incomplete
@@ -78,9 +79,8 @@ CORRECTION_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Omission — explicit "you forgot/missed"
     (re.compile(r"\b(you )(missed|forgot|omitted|skipped)\b", re.I), "omission"),
     (re.compile(r"\bwhy (is|was) it not (done|applied|used|there)\b", re.I), "omission"),
-    # Natural negation grammar — Opus-identified high-precision patterns for this user's style
-    # "not X but Y" — explicit correction structure (exclude "not only...but also" which is additive)
-    (re.compile(r"\bnot (?!only\b).{1,50}\bbut\b.{1,50}\b", re.I), "natural_negation"),
+    # Tightened (Opus+GPT-5.5): require agent-attributing frame; "not sure but" / "not bad but" are benign
+    (re.compile(r"\b(?:(?:that'?s|it'?s|you'?re|you\s+(?:said|wrote|did|made|gave\s+me))\s+not|not\s+(?:what|how|where|when|why|the\s+way))\b.{1,50}\bbut\b", re.I), "natural_negation"),
     # "no,? i (did not|didn't|never) (say|ask|mean|want)"
     (re.compile(r"\bno[,\s].{0,10}i (did not|didn.t|never) (say|ask|mean|want|mention)\b", re.I), "natural_negation"),
     # "try again" — only at message start/standalone; avoids echoed agent text "please try again"
@@ -93,7 +93,8 @@ PERSUASION_PATTERNS: list[tuple[re.Pattern, str]] = [
     # Explicit concession — user acknowledges LLM was right
     (re.compile(r"\b(you'?re|you are) right\b", re.I), "llm_was_right"),
     (re.compile(r"\bfair (point|enough|call)\b", re.I), "llm_was_right"),
-    (re.compile(r"\bgood (point|catch|call|idea|suggestion)\b", re.I), "llm_was_right"),
+    # Tightened (GPT-5.5): require attributing subject; bare "good idea" at work meeting != persuasion
+    (re.compile(r"\b(?:that'?s|this\s+is|your|you\s+made\s+a)\s+(?:a\s+)?good\s+(?:point|catch|call|idea|suggestion)\b|\bgood\s+(?:point|catch|call)[.!]?$", re.I | re.M), "llm_was_right"),
     (re.compile(r"\b(ok|okay|yes)[,\s].{0,30}(go (with|ahead)|use that|do that|proceed|makes sense)\b", re.I), "deferred_to_llm"),
     # Direction reversal — user switches from their original to LLM's suggestion
     (re.compile(r"\bactually[,\s].{0,50}(makes sense|better|right|good|go with)\b", re.I), "direction_reversal"),
@@ -117,7 +118,8 @@ PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\balways (use|apply|include|add|show|put)\b", re.I), "standing_rule"),
     (re.compile(r"\bnever (use|show|include)\b", re.I), "standing_rule"),
     (re.compile(r"\binstead (of|use)\b", re.I), "alternative_preference"),
-    (re.compile(r"\bi (prefer|want|need|expect)\b", re.I), "explicit_preference"),
+    # Tightened (GPT-5.5): require output-object context; bare "I want/need" is too conversational
+    (re.compile(r"\bi\s+prefer\b|\bi\s+expect\s+(?:you|the|this|it)\b|\bi\s+(?:want|need)\s+(?:it|this|the\s+(?:output|answer|result|format|file|response))\s+to\b", re.I), "explicit_preference"),
     # Tightened (GPT-5.5): exclude "must be a bug/mistake/error" — require actionable verb
     (re.compile(r"\b(must|have to)\s+(?:use|include|apply)\b|\b(?:must|has\s+to|have\s+to)\s+be\s+(?:used|included|applied|shown|present|available|formatted|labell?ed|human[- ]?readable|exact|correct|complete)\b", re.I), "hard_requirement"),
     (re.compile(r"\buse .{1,20} not .{1,20}\b", re.I), "tool_preference"),
