@@ -225,10 +225,10 @@ def test_html_stat_counter_shows_preference(graph_output):
 # ── Output path tests ─────────────────────────────────────────────────────────
 
 def test_skill_nodes_present(graph_output):
-    """Skills must be discovered from sessions."""
+    """Skills must be discovered from sessions — expect ~28 from real data."""
     data, _ = graph_output
     skills = [n for n in data["nodes"] if n["group"] == "skill"]
-    assert len(skills) >= 3, f"Too few skill nodes: {len(skills)} (expected ≥3)"
+    assert len(skills) >= 15, f"Too few skill nodes: {len(skills)} (expected ≥15)"
 
 
 def test_skill_nodes_have_edges(graph_output):

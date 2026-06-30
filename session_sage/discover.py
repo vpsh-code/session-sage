@@ -374,7 +374,11 @@ def discover_skills(signals: list["TurnSignal"]) -> list[DiscoveredSkill]:
             skill_type=skill_type.get(name, "named"),
         )
         for name in counts
-        if len(sessions[name]) >= 2  # must appear in ≥2 sessions
+        # tag/ce/named sources: even 1 session is a definite signal
+        # slash-only: require ≥2 sessions to filter noise
+        if len(sessions[name]) >= 1 and not (
+            skill_type.get(name) == "slash" and len(sessions[name]) < 2
+        )
     ]
     return sorted(result, key=lambda s: -s.score)
 

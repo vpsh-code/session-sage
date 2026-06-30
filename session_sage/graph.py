@@ -218,7 +218,7 @@ def build_graph(
         edges_raw[("user", nid, "CORRECTED")] += corr.count
 
     # ── Skill nodes — Copilot skills used across sessions ───────────────────
-    for skill in dk.skills[:20]:
+    for skill in dk.skills[:30]:
         nid = f"skill_{re.sub(r'[^a-z0-9]', '_', skill.name.lower())}"
         label = skill.name.replace("-", " ").title()
         n = upsert(GraphNode(
