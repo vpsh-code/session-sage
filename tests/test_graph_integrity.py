@@ -224,7 +224,51 @@ def test_html_stat_counter_shows_preference(graph_output):
 
 # ── Output path tests ─────────────────────────────────────────────────────────
 
-def test_output_not_in_downloads(graph_output):
+def test_skill_nodes_present(graph_output):
+    """Skills must be discovered from sessions."""
+    data, _ = graph_output
+    skills = [n for n in data["nodes"] if n["group"] == "skill"]
+    assert len(skills) >= 3, f"Too few skill nodes: {len(skills)} (expected ≥3)"
+
+
+def test_skill_nodes_have_edges(graph_output):
+    """Every skill node must connect to the user node."""
+    data, _ = graph_output
+    skill_ids = {n["id"] for n in data["nodes"] if n["group"] == "skill"}
+    connected = set()
+    for l in data["links"]:
+        if l["source"] in skill_ids: connected.add(l["source"])
+        if l["target"] in skill_ids: connected.add(l["target"])
+    orphans = skill_ids - connected
+    assert not orphans, f"Skill nodes with no edges: {orphans}"
+
+
+def test_html_skill_count_matches_json(graph_output):
+    data, html = graph_output
+    g = _extract_graph_from_html(html)
+    json_count = sum(1 for n in data["nodes"] if n["group"] == "skill")
+    html_count = sum(1 for n in g["nodes"] if n["group"] == "skill")
+    assert html_count == json_count, f"HTML has {html_count} skill nodes but JSON has {json_count}"
+
+
+def test_html_visible_groups_includes_skill(graph_output):
+    _, html = graph_output
+    m = re.search(r"const visibleGroups\s*=\s*new Set\(\[([^\]]+)\]\)", html)
+    assert m, "visibleGroups definition not found"
+    assert "'skill'" in m.group(1) or '"skill"' in m.group(1), \
+        f"'skill' not in initial visibleGroups: {m.group(1)}"
+
+
+def test_html_has_skill_filter_button(graph_output):
+    _, html = graph_output
+    assert 'data-group="skill"' in html, "No filter button for 'skill' group"
+
+
+def test_html_stat_counter_shows_skills(graph_output):
+    _, html = graph_output
+    assert "'Skills'" in html or '"Skills"' in html or ">Skills<" in html, \
+        "No 'Skills' stat label in HTML"
+
     """Output must never default to ~/Downloads."""
     import session_sage.run as run_mod
     import inspect

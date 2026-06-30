@@ -33,6 +33,7 @@ GROUP_COLOURS = {
     "user":         "#f0c040",   # gold
     "topic":        "#4a9eff",   # blue
     "tool":         "#50c878",   # emerald
+    "skill":        "#f97316",   # orange — Copilot skills
     "preference":   "#a78bfa",   # violet
     "correction":   "#ff6b6b",   # red-orange
     "persuasion":   "#fb923c",   # amber — LLM convinced user
@@ -129,6 +130,7 @@ def render_html(graph_data: dict, title: str = "Session Sage — Knowledge Graph
   <button class="filter-btn active" style="--c:#f0c040" data-group="user">You</button>
   <button class="filter-btn active" style="--c:#4a9eff" data-group="topic">Topics</button>
   <button class="filter-btn active" style="--c:#50c878" data-group="tool">Tools</button>
+  <button class="filter-btn active" style="--c:#f97316" data-group="skill">Skills</button>
   <button class="filter-btn active" style="--c:#a78bfa" data-group="preference">Preferences</button>
   <button class="filter-btn active" style="--c:#ff6b6b" data-group="correction">Corrections</button>
   <button id="reset-zoom" class="filter-btn" style="--c:#94a3b8">Reset Zoom</button>
@@ -155,6 +157,7 @@ def render_html(graph_data: dict, title: str = "Session Sage — Knowledge Graph
       <div class="legend-item"><div class="legend-dot" style="background:#f0c040"></div> You (the user)</div>
       <div class="legend-item"><div class="legend-dot" style="background:#4a9eff"></div> Topic domain</div>
       <div class="legend-item"><div class="legend-dot" style="background:#50c878"></div> Tool / library</div>
+      <div class="legend-item"><div class="legend-dot" style="background:#f97316"></div> Copilot skill</div>
       <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div> Standing preference</div>
       <div class="legend-item"><div class="legend-dot" style="background:#ff6b6b"></div> Recurring correction</div>
     </div>
@@ -187,6 +190,7 @@ addStat('Turns', meta.total_turns || '—');
 addStat('Nodes', GRAPH.nodes.length);
 addStat('Edges', GRAPH.links.length);
 addStat('Corrections', GRAPH.nodes.filter(n=>n.group==='correction').length);
+addStat('Skills', GRAPH.nodes.filter(n=>n.group==='skill').length);
 addStat('Preferences', GRAPH.nodes.filter(n=>n.group==='preference').length);
 
 if (meta.first_session) addStat('From', meta.first_session.slice(0,10));
@@ -209,7 +213,7 @@ document.getElementById('reset-zoom').onclick = () =>
   svg.transition().duration(500).call(zoom.transform, d3.zoomIdentity);
 
 // Groups tracking
-const visibleGroups = new Set(['user','topic','tool','preference','correction','concept']);
+const visibleGroups = new Set(['user','topic','tool','skill','preference','correction','concept']);
 
 // Build nodes/links with mutable visibility
 const allNodes = GRAPH.nodes.map(d => ({{...d, visible: true}}));

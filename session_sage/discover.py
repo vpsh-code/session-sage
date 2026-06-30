@@ -96,12 +96,28 @@ class DiscoveredCorrection:
 
 
 @dataclass
+class DiscoveredSkill:
+    name: str                  # e.g. "dream", "ce-brainstorm", "org-lookup"
+    session_count: int
+    total_count: int
+    first_seen: str = ""
+    last_seen: str = ""
+    examples: list[str] = field(default_factory=list)
+    skill_type: str = ""       # "ce" | "named" | "slash"  — detected source
+
+    @property
+    def score(self) -> float:
+        return (self.session_count ** 1.5) * math.log1p(self.total_count)
+
+
+@dataclass
 class DiscoveredKnowledge:
     tools: list[DiscoveredTool]
     paths: list[DiscoveredPath]
     preferences: list[DiscoveredPreference]
     topics: list[DiscoveredTopic]
     corrections: list[DiscoveredCorrection]
+    skills: list[DiscoveredSkill]
     total_sessions: int
     total_turns: int
 
@@ -258,6 +274,109 @@ def discover_paths(signals: list["TurnSignal"]) -> list[DiscoveredPath]:
         if len(sessions[root]) >= 2
     ]
     return sorted(result, key=lambda p: -p.score)
+
+
+# ---------------------------------------------------------------------------
+# Skill discovery — extracts used Copilot skills from session turns
+# ---------------------------------------------------------------------------
+
+# Three extraction signals — no hardcoded skill names
+# 1. <skill-context name="X"> — the CLI injects this tag when a skill activates
+_SKILL_TAG    = re.compile(r'<skill-context\s+name=["\']([^"\']+)["\']', re.I)
+# 2. Compound-engineering skill pattern: ce-<word>[-<word>]+  (purely syntactic)
+_SKILL_CE     = re.compile(r'\bce-[a-z][a-z0-9]+(?:-[a-z][a-z0-9]+)+\b')
+# 3. Slash invocation at start of message or after whitespace: /skill-name
+#    Must be hyphenated (multi-word) to filter out /help, /clear, etc.
+_SKILL_SLASH  = re.compile(r'(?:^|\s)/([a-z][a-z0-9]+(?:-[a-z][a-z0-9]+)+)\b', re.M)
+# 4. "skill: X" or "skill X" invocation pattern in instructions text
+_SKILL_INVOKE = re.compile(r'\bskill[:\s]+["\']?([a-z][a-z0-9]+(?:-[a-z][a-z0-9]+)*)["\']?', re.I)
+
+# Single-segment names that are well-known standalone skills (not caught by hyphens)
+_SKILL_SINGLE = re.compile(r'\b(dream|graphify|mempalace)\b', re.I)
+
+# Filter noise — generic lowercase words that look like skill names but aren't
+_SKILL_STOPWORDS = frozenset("""
+and the for with this that from not use call run add do get set has have
+when where which what how why did does being been would could should must
+""".split())
+
+
+def discover_skills(signals: list["TurnSignal"]) -> list[DiscoveredSkill]:
+    """
+    Discover which Copilot skills were used across sessions.
+
+    Three extraction tiers (no hardcoded skill list):
+    1. <skill-context name="X"> injection tags  — highest precision
+    2. ce-* compound-engineering pattern         — syntactic
+    3. /skill-name slash invocations             — contextual
+    4. skill: "name" invocation references       — instructional
+    5. Known standalone names (dream, graphify)  — short but unambiguous
+    """
+    counts:     Counter[str] = Counter()
+    sessions:   dict[str, set[str]] = defaultdict(set)
+    first_seen: dict[str, str] = {}
+    last_seen:  dict[str, str] = {}
+    examples:   dict[str, list[str]] = defaultdict(list)
+    skill_type: dict[str, str] = {}
+
+    for sig in signals:
+        raw = sig.turn.user_message or ""
+        msg = sig.cleaned_message
+        sid = sig.turn.session_id
+        ts  = sig.turn.timestamp
+
+        found: dict[str, str] = {}  # name → source type
+
+        # Tier 1: tag extraction (most reliable — CLI injects these automatically)
+        for m in _SKILL_TAG.finditer(raw):
+            name = m.group(1).strip().lower()
+            if name and name not in _SKILL_STOPWORDS and len(name) > 2:
+                found[name] = "tag"
+
+        # Tier 2: ce- pattern (syntactic, catches all compound-engineering skills)
+        for m in _SKILL_CE.finditer(raw):
+            found[m.group(0).lower()] = "ce"
+
+        # Tier 3: slash invocations (at message start or after whitespace)
+        for m in _SKILL_SLASH.finditer(raw):
+            name = m.group(1).lower()
+            if name not in _SKILL_STOPWORDS:
+                found[name] = found.get(name, "slash")
+
+        # Tier 4 removed — "skill: X" pattern too noisy (matches prose like "Primary:", "Executes:")
+
+        # Tier 5: well-known single-word standalone skills
+        for m in _SKILL_SINGLE.finditer(raw):
+            found[m.group(1).lower()] = found.get(m.group(1).lower(), "named")
+
+        for name, stype in found.items():
+            counts[name] += 1
+            sessions[name].add(sid)
+            if name not in first_seen or ts < first_seen[name]:
+                first_seen[name] = ts
+            if name not in last_seen or ts > last_seen[name]:
+                last_seen[name] = ts
+            if skill_type.get(name, "named") in ("named", "invoke", "slash") and stype in ("tag", "ce"):
+                skill_type[name] = stype  # promote to higher-confidence source
+            elif name not in skill_type:
+                skill_type[name] = stype
+            if len(examples[name]) < 4:
+                examples[name].append(_short(raw, 100))
+
+    result = [
+        DiscoveredSkill(
+            name=name,
+            session_count=len(sessions[name]),
+            total_count=counts[name],
+            first_seen=first_seen.get(name, ""),
+            last_seen=last_seen.get(name, ""),
+            examples=examples[name],
+            skill_type=skill_type.get(name, "named"),
+        )
+        for name in counts
+        if len(sessions[name]) >= 2  # must appear in ≥2 sessions
+    ]
+    return sorted(result, key=lambda s: -s.score)
 
 
 # ---------------------------------------------------------------------------
@@ -626,6 +745,7 @@ def discover_all(
         preferences=discover_preferences(signals),
         topics=discover_topics(sessions, signals),
         corrections=discover_corrections(signals),
+        skills=discover_skills(signals),
         total_sessions=len(sessions),
         total_turns=len(all_turns),
     )

@@ -217,6 +217,27 @@ def build_graph(
         ))
         edges_raw[("user", nid, "CORRECTED")] += corr.count
 
+    # ── Skill nodes — Copilot skills used across sessions ───────────────────
+    for skill in dk.skills[:20]:
+        nid = f"skill_{re.sub(r'[^a-z0-9]', '_', skill.name.lower())}"
+        label = skill.name.replace("-", " ").title()
+        n = upsert(GraphNode(
+            id=nid,
+            label=label,
+            group="skill",
+            size=max(7, min(28, int(skill.session_count ** 0.8) + 7)),
+            count=skill.session_count,
+            description=(
+                f"Skill '{skill.name}' — used in {skill.session_count} sessions"
+                f", {skill.total_count} invocation(s)"
+            ),
+            examples=skill.examples,
+            first_seen=skill.first_seen,
+            last_seen=skill.last_seen,
+            metadata={"skill_type": skill.skill_type},
+        ))
+        edges_raw[("user", nid, "USES_SKILL")] += skill.session_count
+
     # ── User metadata (data-derived) ─────────────────────────────────────────
     nodes["user"].metadata.update({
         "top_topics":    [(t.label, t.session_count) for t in dk.topics[:5]],
