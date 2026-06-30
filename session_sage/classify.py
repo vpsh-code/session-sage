@@ -124,7 +124,8 @@ PREFERENCE_PATTERNS: list[tuple[re.Pattern, str]] = [
     (re.compile(r"\b(must|have to)\s+(?:use|include|apply)\b|\b(?:must|has\s+to|have\s+to)\s+be\s+(?:used|included|applied|shown|present|available|formatted|labell?ed|human[- ]?readable|exact|correct|complete)\b", re.I), "hard_requirement"),
     (re.compile(r"\buse .{1,20} not .{1,20}\b", re.I), "tool_preference"),
     (re.compile(r"\bnot .{1,20}\buse\b.{1,20}\binstead\b", re.I), "tool_preference"),
-    (re.compile(r"\b(org|level) (l?2|two)\b", re.I), "org_level_preference"),
+    # Tightened (GPT-5.5): require org/level context explicitly; bare "org 2" too narrow already but widen check
+    (re.compile(r"\b(?:prefer|want|need|should|must|only|always)\b.{0,60}\b(?:org|organization)\s+(?:level\s+)?(?:l?2|two)\b|\b(?:use|filter|group|aggregate|break\s+down)\s+by\s+(?:org|organization)\s+(?:level\s+)?(?:l?2|two)\b", re.I), "org_level_preference"),
     (re.compile(r"\bfrom now on\b", re.I), "standing_rule"),
     (re.compile(r"\b(in this (repo|project)|for (this|all) (file|workbook)s?)\b", re.I), "scoped_preference"),
 ]
@@ -156,8 +157,8 @@ KNOWLEDGE_BOUNDARY_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 STAKEHOLDER_CONTEXT_PATTERNS: list[tuple[re.Pattern, str]] = [
-    # Tightened: "exec" alone matches "execute/executed"; require full form or paired context
-    (re.compile(r"\b(?:c[- ]?suite|senior leadership|hrlt|chro|cfo|ceo|coo)\b|\bexec(?:utive)?s?\b.{0,40}\b(?:audience|ready|review|presentation|will ask|care about)\b", re.I), "executive_audience"),
+    # Tightened (GPT-5.5): require audience/presentation context alongside exec mentions
+    (re.compile(r"\b(?:c[- ]?suite|hrlt|chro|cfo|ceo|coo)\b|\b(?:senior\s+leadership|exec(?:utive)?s?)\b.{0,40}\b(?:audience|ready|review|presentation|will\s+ask|care\s+about|stakeholder|brief|handoff|deck|meeting)\b", re.I), "executive_audience"),
     (re.compile(r"\b(board|steerco|leadership team|management team)\b", re.I), "formal_audience"),
     (re.compile(r"\b(presenting to|showing to|sharing with|this (will|needs to) go to)\b", re.I), "handoff_context"),
     (re.compile(r"\bpoliticall?y? sensitive\b|\bsensitive topic\b", re.I), "political_sensitivity"),
@@ -213,7 +214,8 @@ ARCHITECTURE_MENTAL_MODEL_PATTERNS: list[tuple[re.Pattern, str]] = [
 ]
 
 URGENCY_PATTERNS: list[tuple[re.Pattern, str]] = [
-    (re.compile(r"\b(asap|urgent|immediately|right now)\b", re.I), "immediate_urgency"),
+    # Tightened (GPT-5.5): exclude "immediately after/before/available/adjacent"
+    (re.compile(r"\b(asap|urgent|right now)\b|\bimmediately\b(?!\s+(?:after|before|under|available|adjacent|following|preceding))", re.I), "immediate_urgency"),
     # Tightened (Opus): require deadline framing — "today" alone fires on "today's data"
     (re.compile(r"\b(?:by|before|due|needs?\s+(?:it|this)\s+by|deadline\s+(?:is\s+)?)\s+(?:today|tonight|this\s+morning|this\s+afternoon|eod)\b|\b(?:today|tonight)\s+(?:by|at)\s+\d", re.I), "same_day_deadline"),
     (re.compile(r"\bbefore (the )?(meeting|call|review|presentation)\b", re.I), "event_deadline"),
